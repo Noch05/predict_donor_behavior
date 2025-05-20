@@ -42,8 +42,7 @@ Many of the code files are specifically written for LSF scheduled HPC machines, 
 Additionally this also means don't try to run the files, with the full set of data, on a personal machine either, unless you have the resources to.
 Training outright is not too expensive, but the Cross-Validation and hyperparameter tuning ballooned the number of models trained.
 
-If you simply want to see the results, I have the finished model objects but they are far to large to put up in GitHub, even with LFS,
-so feel free to reach out to me at <noahochital@icloud.com>.
+If you simply want to see the results free to reach out to me at <noahochital@icloud.com>, I have the finished model objects but they are far to large to put up in GitHub, along with the plots/figures.
 
 
 ## License
