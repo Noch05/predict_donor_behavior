@@ -44,9 +44,8 @@ data <- data %>% mutate(donate = factor(donate, levels = c(0, 1),
 )
 print("Data Cleaned")
 
-impute <- function(data, m, cores) {
-  mices <- futuremice(data, m, future.plan = "cluster",
-                      n.cores = cores, parallelseed= 23490, nnet.MaxNWts = 3000)
+impute <- function(data, m) {
+  mices <- futuremice(data, m, parallelseed= 23490, nnet.MaxNWts = 3000)
   
   imputed <- complete(mices, action = "long")
   
@@ -85,10 +84,13 @@ set.seed(582373)
 train <- sample_n(data, size = 0.8*nrow(data))
 test <- setdiff(data, train)
 
+
 print("Start imputing")
-train <- impute(train, m = 50, cores = 30)
+set.seed(52345)
+train <- impute(train, m = 50)
 write_rds(train, "train.rds")
 
 print("train done")
-test <- impute(test, m = 50, cores = 30)
+set.seed(52345)
+test <- impute(test, m = 50)
 write_rds(test, "test.rds")
