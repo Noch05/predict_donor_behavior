@@ -1,6 +1,11 @@
 ## Predicting Donor Behavior  
 This is a GitHub Repository for my research project: "Predicting Donor Behavior: Applying Machine Learning to Donor Classification"  
-This repo houses all the code that produced the final paper, the paper, and the figures presented.
+This repo houses all the code that produced the my final product.
+
+The goal of this project was to build off of existing literature on causal relationships between various factors
+and propensity to donate, by using machine learning to predict the outcome instead. I tested simple logistic regression
+and random forest models, 1 from each class was regularized and tuned, while 1 maintained the default hyper parameters.
+Ultimately I find for modes performance across all models, (F1 $\approx 0.6$), and I conclude that the noisy data and issues with survey responses hinder the models.
 
 ## Data
 
@@ -9,26 +14,39 @@ and is pulled directly using the `Dataverse` API from Harvard's Dataverse Databa
 
 ## Code Files
 
-* `data_cleaning_424.R` gathers the data from the `Dataverse` API, cleans it, and saves it as .rds and .csv files
-* `training.R` is a script which imputes missing data via `mice`, and trains and tunes the hyperparameters of each model. The script is written for an LSF scheduled HPC, and took 17 days to complete.   
-* `comp_train.R` is a script with trains default versions of each model with not tuning, written for HPC but can be executed on a typical computer.  
-* `rf_final.R` takes the optimal random forest hyperparameters from `training.R` and retrains the model in `Ranger` to take advantage of package features.  
-
-## Figs
-
-Contains all figures as `.png` files, and all tables as `.tex` which can be compiled in LaTeX, and `.txt` for easy viewing.
+* `00-data_cleaning_424.R` gathers the data from the `Dataverse` API, cleans it, and saves it as .rds and .csv files
+* `01-impute.R` is a script which imputes missing data via `mice`. and trains and tunes the hyperparameters of each model. 
+* `02-hyperparameter_tuning.R` tunes the hyper parameters of each model using `caret`. 
+* `03-train_default.R` is a script with trains default versions of each model with not tuning, written for HPC but can be executed on a typical computer with modifications.  
+* `04-train_optimal_rf.R` takes the optimal random forest hyperparameters from `training.R` and retrains the model in `Ranger` to take advantage of package features.  
+* `05-test_ranger_tidymodels.R` is a script that experiments with training random forests from the `tidymodels` framework.
+* `06-test_xgboost.R` is a script that experiments with training boosted decision trees using `xgboost`.
+* `07-test_keras.R` is a script that uses a subset of data to train multi-layer perceptron using `tidymodels`, `Keras` and `TensorFlow`.
 
 ## Paper
 
-Contains the `.qmd` file with the paper, a `.bib` file with citation information, and a `.R` file which will generate all figures used.  
+The full paper text is not available at this time, looking for a place to publish. However, if you have any questions or working on something similar feel free to reach email me at <noahochital@icloud.com>
+
+The framework in `R` I used for this project is `caret` but to anyone starting any machine learning project with `R`, I would reccomend the use of `tidymodels` instead.
+It's created by the same developer, is easier to use, while `caret` no longer gets updates.
+
+Code files `05` through `07` are testing files, and they did not influence the results of my analysis or paper.
+Prior to embarking on this project, I knew nothing of machine learning but by the end I wanted to test out more complicated models.
+The `xboost` and `keras` scripts test small hyperparameter combos and bayesian optimization on a subset of the data, but ultimately don't provide enough of a performance increase to be worth taking the time and resources to fully redo the project in the `tidymodels` framework nor add them.
+Although adding them would allow for a more holistic view of different types of machine learning models, I simply do not have the time or compute resources to full rework the project, for what is likely to be no significant change in my final conclusions.
 
 ## Important Notes for Replication
 
-For all the training procedures, seeds have explicitly been set to ensure reproducibility, however, running the scripts still requires a HPC environment with a large amount of memory. 
+Many of the code files are specifically written for LSF scheduled HPC machines, so getting them to work properly on other ones may require tweaking.
+Additionally this also means don't try to run the files, with the full set of data, on a personal machine either, unless you have the resources too.
+Training outright is not too expensive, but the Cross-Validation and hyperparameter tuning balloon the number of models trained.
 
-Additionally, the model objects from which the figures and tables in the paper were created from are very large objects, that cannot be uploaded to GitHub, the `.qmd` file still has all the text for the paper, and the figs folder has all of the accompanying material if necessary. The model files will be made available upon individual request.
+If you simply want to see the results, I have the finished model objects but they are far to large to put up in GitHub, even with LFS,
+so feel free to reach out to me at <noahochital@icloud.com> if you would like to see them.
 
-## Experimentation
 
-`test_nn.R` and `test_xgboost.R` are experimental files, that are designed to run on personal machine. They sample from the larger dataset and test running the various models.
-This is apart of expanding the project after the initial completion of the paper. Neural Networks will likely be added to a future analysis.
+## License
+
+The code for this project is licensed under GPLv3, see [License](LICENSE). Feel free to use it as a starting point for your own projects, with proper attribution to myself and all the creators of the packages used.
+
+
