@@ -646,7 +646,7 @@ process <- function(data, year, mapping) {
                    .default = "Other"), 
                    levels = c("White", "Black", "Hispanic",
                                                    "Asian", "Native American", "Other")),
-  educ = ordered(recode(!!sym(mapping[[as.character(year)]]$educ), 
+  educ = facor(recode(!!sym(mapping[[as.character(year)]]$educ), 
                           `1`= "No HS",
                           `2` = "HS",
                           `3` = "Some College",
@@ -794,7 +794,7 @@ process <- function(data, year, mapping) {
     year==2008 ~ NA,
     TRUE ~ if_else(!!sym(mapping[[as.character(year)]]$investor) == 1, 1,0)),
 
-  pol_interest = ordered(recode(!!sym(mapping[[as.character(year)]]$int),
+  pol_interest = facor(recode(!!sym(mapping[[as.character(year)]]$int),
                            `1` = "Most",
                            `2` = "Some",
                            `3` = "Little",
@@ -834,14 +834,14 @@ process <- function(data, year, mapping) {
   
   relig_imp = case_when(
     year %in% c(2006,2007)~
-      ordered(recode(!!sym(mapping[[as.character(year)]]$religimp), 
+      facor(recode(!!sym(mapping[[as.character(year)]]$religimp), 
                      '1' = "Very",
                      `2` = "None",
                     .default = "None"),
               levels = c("None", "Little", "Somewhat", "Very")),
     
     TRUE~ 
-      ordered(recode(!!sym(mapping[[as.character(year)]]$religimp),
+      facor(recode(!!sym(mapping[[as.character(year)]]$religimp),
                                `1` = "Very",
                                `2`= "Somewhat",
                                `3` = "Little",
@@ -867,7 +867,7 @@ process <- function(data, year, mapping) {
  
   income = case_when(
     year %in% c(2018,2022,2020,2016,2014,2012,2017,2019)~
-      ordered(recode(!!sym(mapping[[as.character(year)]]$inc),
+      facor(recode(!!sym(mapping[[as.character(year)]]$inc),
                      `1` = "<10k",
                      `2` = "10k-20k",
                      `3` = "20k-30k",
@@ -888,7 +888,7 @@ process <- function(data, year, mapping) {
                          "70k-80k", "80k-90k", "100k-120k", "120k-150k", ">150k", "150k-200k", 
                          "200k-250k", "250k-350k", "350k-500k",">500k")),
     TRUE~
-      ordered(recode(!!sym(mapping[[as.character(year)]]$inc),
+      facor(recode(!!sym(mapping[[as.character(year)]]$inc),
                      `1` = "<10k",
                      `2` = "10k-20k",
                      `3` = "10k-20k",
