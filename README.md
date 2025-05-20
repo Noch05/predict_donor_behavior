@@ -39,11 +39,11 @@ Although adding them would allow for a more holistic view of different types of 
 ## Important Notes for Replication
 
 Many of the code files are specifically written for LSF scheduled HPC machines, so getting them to work properly on other ones may require tweaking.
-Additionally this also means don't try to run the files, with the full set of data, on a personal machine either, unless you have the resources too.
+Additionally this also means don't try to run the files, with the full set of data, on a personal machine either, unless you have the resources to.
 Training outright is not too expensive, but the Cross-Validation and hyperparameter tuning ballooned the number of models trained.
 
 If you simply want to see the results, I have the finished model objects but they are far to large to put up in GitHub, even with LFS,
-so feel free to reach out to me at <noahochital@icloud.com> if you would like to see them and run `08-predict_donor.R`.
+so feel free to reach out to me at <noahochital@icloud.com>.
 
 
 ## License
