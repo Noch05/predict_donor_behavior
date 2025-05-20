@@ -33,8 +33,8 @@ It's created by the same developer, is easier to use, while `caret` no longer ge
 
 Code files `05` through `07` are testing files, and they did not influence the results of my analysis or paper.
 Prior to embarking on this project, I knew nothing of machine learning but by the end I wanted to test out more complicated models.
-The `xboost` and `keras` scripts test small hyperparameter combos and bayesian optimization on a subset of the data, but ultimately don't provide enough of a performance increase to be worth taking the time and resources to redo the project in the `tidymodels` framework nor add them.
-Although adding them would allow for a more holistic view of different types of machine learning models, but I simply do not have the time or compute resources to fully rework the project, for what is likely to be no significant change in my final conclusions.
+The `xboost` and `keras` are scripts that currently, test small hyperparameter combos and Bayesian optimization on a subset of the data,
+from my initial tests, there is no real performance increase, but I plan on attempting to add them to the original analysis, and redo the whole thing in the `tidymodels` framework.
 
 ## Important Notes for Replication
 
