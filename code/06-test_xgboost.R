@@ -5,8 +5,7 @@ library(butcher)
 library(future)
 
 plan(multisession, workers = 12)
-train <- sample_n(read_rds("data/train.rds")[[1]], 60000)
-
+train <- sample_n(read_rds("data/train.rds")[[1]], 40000)
 
 
 train <- train %>% mutate(weights = if_else(
@@ -43,7 +42,7 @@ params <-extract_parameter_set_dials(xg)
 params <- update(params, mtry = mtry(range = c(1,158)),
                 trees = trees(range = c(100, 3000)),
                 min_n = min_n(range = c(1,1000)))
-search <- grid_space_filling(params, size =15)
+search <- grid_space_filling(params, size =10)
 
 
 folds <- vfold_cv(train, v = 5)
@@ -82,21 +81,5 @@ time <- end - start
 metrics <- collect_metrics(bayes)
 
 best <- select_best(bayes)
-
-fit <- fit(finalize_workflow(wf, best), train)
-
-pred <- function(object, newdata) {
- predict(object, new_data = newdata) %>% pull(.pred_class)
-}
-
-vi_permute(fit, train = train, target = train$donate,
-           metric = "accuracy",
-           pred_wrapper = pred)
-
-test <- sample_n(read_rds("data/test.rds")[[1]], 15000)
-
-preds <- predict(fit, test)
-
-
 
 
