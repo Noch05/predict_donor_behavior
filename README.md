@@ -15,7 +15,7 @@ and is pulled directly using the `Dataverse` API from Harvard's Dataverse Databa
 ## Code Files
 
 * `00-data_cleaning_424.R` gathers the data from the `Dataverse` API, cleans it, and saves it as .rds and .csv files
-* `01-impute.R` is a script which imputes missing data via `mice`. and trains and tunes the hyperparameters of each model. 
+* `01-impute.R` is a script which imputes missing data via `mice`.
 * `02-hyperparameter_tuning.R` tunes the hyper parameters of each model using `caret`. 
 * `03-train_default.R` is a script with trains default versions of each model with not tuning, written for HPC but can be executed on a typical computer with modifications.  
 * `04-train_optimal_rf.R` takes the optimal random forest hyperparameters from `training.R` and retrains the model in `Ranger` to take advantage of package features.  
