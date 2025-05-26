@@ -33,7 +33,7 @@ It's created by the same developer, is easier to use, while `caret` no longer ge
 
 Code files `05` through `07` are testing files, and they did not influence the results of my analysis or paper.
 Prior to embarking on this project, I knew nothing of machine learning but by the end I wanted to test out more complicated models.
-The `xboost` and `keras` scripts test these algorithms by assessing a random grid search, along with a Bayesian optimization routine after for fine tuning. Ultimately they don't provide enough of a performance increase to be worth taking the time and resources to redo the re-write project.
+The `xboost` and `keras` scripts test these algorithms by assessing a random grid search, along with a Bayesian optimization routine after for fine tuning. Ultimately they don't provide enough of a performance increase to be worth taking the time and resources to add into the paper.
 Although adding them would allow for a more holistic view of different types of machine learning models, but I simply do not have the time to fully rework the project, for what is likely to be no significant change in my final conclusions.
 
 ## Important Notes for Replication
