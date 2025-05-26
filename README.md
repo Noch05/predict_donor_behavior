@@ -19,9 +19,9 @@ and is pulled directly using the `Dataverse` API from Harvard's Dataverse Databa
 * `02-hyperparameter_tuning.R` tunes the hyper parameters of each model using `caret`. 
 * `03-train_default.R` is a script with trains default versions of each model with not tuning, written for HPC but can be executed on a typical computer with modifications.  
 * `04-train_optimal_rf.R` takes the optimal random forest hyperparameters from `training.R` and retrains the model in `Ranger` to take advantage of package features.  
-* `05-test_ranger_tidymodels.R` is a script that experiments with training random forests from the `tidymodels` framework.
-* `06-test_xgboost.R` is a script that experiments with training boosted decision trees using `xgboost`.
-* `07-test_keras.R` is a script that uses a subset of data to train multi-layer perceptron using `tidymodels`, `Keras` and `TensorFlow`.
+* `05-train_ranger_tidymodels.R` is a script that experiments with training random forests from the `tidymodels` framework.
+* `06-train_xgboost.R` is a script that experiments with training boosted decision trees using `xgboost`.
+* `07-train_mlp.R` is a script that uses a subset of data to train multi-layer perceptron using `tidymodels`, `Keras` and `TensorFlow`.
 * `08-predict_donor.R` is an accompaniment to the final paper, hosts all the code used in the final aspects of the analysis, such as creating figures and tables.
 
 ## Paper
@@ -33,8 +33,8 @@ It's created by the same developer, is easier to use, while `caret` no longer ge
 
 Code files `05` through `07` are testing files, and they did not influence the results of my analysis or paper.
 Prior to embarking on this project, I knew nothing of machine learning but by the end I wanted to test out more complicated models.
-The `xboost` and `keras` scripts test small hyperparameter combos and bayesian optimization on a subset of the data, but ultimately don't provide enough of a performance increase to be worth taking the time and resources to redo the project in the `tidymodels` framework nor add them.
-Although adding them would allow for a more holistic view of different types of machine learning models, but I simply do not have the time or compute resources to fully rework the project, for what is likely to be no significant change in my final conclusions.
+The `xboost` and `keras` scripts test these algorithms by assessing a random grid search, along with a Bayesian optimization routine after for fine tuning. Ultimately they don't provide enough of a performance increase to be worth taking the time and resources to redo the re-write project.
+Although adding them would allow for a more holistic view of different types of machine learning models, but I simply do not have the time to fully rework the project, for what is likely to be no significant change in my final conclusions.
 
 ## Important Notes for Replication
 
