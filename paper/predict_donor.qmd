@@ -1,0 +1,933 @@
+---
+title: "Predicting Donor Behavior: Applying Machine Learning to Donor Classification [Draft SPSA 2026]"
+author:
+  name: Noah Ochital^[American University, <no9857a@american.edu>]
+  email: <no9857a@american.edu>
+format:
+  pdf:
+    number-sections: false
+    toc: false
+    geometry:
+      - top=3cm
+editor: source
+documentclass: article
+abstract: "Fundraising is one of the most essential actions for any political campaign. Campaign money finances all of the events, advertising, and staff that are necessary for a candidate to have any chance at winning an election. The majority of this money comes directly or indirectly through individual donors, making it crucial for any campaign to effectively target these individuals and raise more than their opponents. Using the previous studies on donor behavior and donor motivation theory as a starting point, I use a large dataset of 451477 observations combined from 12 years of the Cooperative Election Study to attempt to train a classifier that can be used to predict donation behavior. I trained logistic regression, random forests, and gradient boosted trees, using 10-fold cross-validation, and Bayesian optimization to tune hyperparameters where applicable. Overall, the classifiers exhibit similar modest performance with F1 scores around 0.63 and ROC-AUC around 0.85, placing them in the baseline comparison but below what is typically considered well-performing. However, without any other models to compare with in the literature or industry, accurately gauging the relative performance of these models is difficult. Ultimately, these models have the potential to be useful at increasing donor yield rates and decreasing donor acquisition costs, but they also highlight the difficulties and limitations of using self-reported survey data plagued with issues like self-response bias and missingness for complex prediction tasks."
+fig-cap-location: bottom
+tbl-cap-location: top
+fig-pos: "H"
+execute:
+  echo: FALSE
+  output: FALSE
+  warning: FALSE
+  cache: TRUE
+bibliography: predict_donor.bib
+---
+
+\thispagestyle{empty}
+\newpage
+```{r}
+library(tidyverse)
+library(grid)
+library(gridExtra)
+library(ranger)
+library(tidymodels)
+library(naniar)
+library(mice)
+library(DescTools)
+library(stargazer)
+library(rpart)
+library(rpart.plot)
+library(BSDA)
+library(rstatix)
+library(vip)
+library(here)
+library(usmap)
+library(kableExtra)
+library(knitr)
+library(xtable)
+library(huxtable)
+
+options(digits = 4)
+```
+
+```{r}
+original <- read_rds(here("data/cleaned_data.rds")) |> select(-state, -year)
+original <- map_dfr(
+  original,
+  ~ {
+    if ("ordered" %in% class(.x)) {
+      lvls <- levels(.x)
+      .x <- factor(.x, ordered = FALSE)
+      levels(.x) <- (lvls)
+    }
+    .x
+  }
+)
+```
+
+# The Role of Prediction in Campaign Finance
+
+In the United States, the size of a candidate's campaign fund is an important indicator of electoral success. Campaign money finances expenditures like political advertising, campaign events, and staff salaries, all of which are instrumental in a candidate's path to victory. Recent research has shown strong relationships exist between the volume of advertisements and the candidate's share of the overall vote on election day [@stratmann; @gordon], making it crucial for candidates to out-advertise and therefore out-spend their opponents. Appropriately, the most recent presidential elections (2020 and 2024) both had adjusted real expenditures above \$15 billion, compared to 2000, where spending only reached \$5 billion (in 2024 dollars) [@glavin]. The primary source of these funds is individual donors [@baker; @reynolds], who donated over \$7 billion in the 2020 election, roughly half of the \$15 billion total spent [@reynolds pp. 8]. Therefore, as a campaign, it is essential to capture as many of these donors as possible, to get their contributions and fund the candidate's victory.
+
+Predictive models play a pivotal role in making fundraising more efficient, saving a campaign valuable time and resources. Consider the example of a U.S. Senate race in a state with 20 million people, half of whom belong to the candidate's party. If the campaign targets within the state and within the party, the potential donor pool is still 10 million people. Contacting each of these individuals is impossible, but if the pool can be narrowed to the 100,000 or 10,000 people who are predicted to donate, the campaign can focus on them instead. When these predictions are accurate, campaigns can raise more money over an electoral cycle by only soliciting those with the highest probability of donating. This saves the campaign time and resources, because it is no longer reaching out to individuals who are unlikely to donate. Additionally, better predictions allow campaigns to gain an important competitive edge against their opponents.
+
+Campaigns have been making use of predictive models as far back as the 2008 Presidential Election cycle [@walker2021], and have only become more widespread as more data becomes available. Currently, parties and campaigns have amassed large databases, amalgamating public sources, with private data from commercial data brokers [@walker2021; @nickerson2014]. However, simply using all this data would be computationally impractical, so narrowing down the important predictors of donor behavior is essential for any predictive modelling approach.
+
+Currently, researchers have explored various factors that could be used to make these predictions both theoretically and empirically. The theoretical approach emphasizes the desires people have to influence electoral outcomes, shape public policy, and engage in social networks [@niebler; @baker; @dwyre; @francia2003; @littlemoney], but these characteristics can be difficult to measure effectively. Empirical studies instead highlight specific variables such as candidate ideology, individual ideology, congressional committee membership, and policy alignment as important factors in someone's decision to donate [@baker; @niebler; @barber; @ensley]. However, this paper diverges from this existing work by aiming instead to develop a stand-alone predictive model (classifier) that can differentiate donors and non-donors. This model will incorporate the key variables identified by prior research but will focus exclusively on self-reported survey data, testing whether self-reported data is effective for predictive purposes.
+
+To do this, I created a comprehensive dataset spanning 12 years of the Cooperative Election Study (CES; Formerly Cooperative Congressional Election Study CCES), providing a large sample of survey data with `r nrow(original)` observations for training and testing [@cces06; @cces07; @cces08; @cces10; @cces12; @cces14; @cces16; @cces17; @cces18; @cces19; @cces20; @cces22]. My analysis involves three common classifiers: logistic regression, random forest, and gradient boosted trees. The final performance of each model was assessed using the same holdout set from which the accuracy, recall, precision, F1, and area under the ROC curve were calculated. Additionally, within-model comparisons were made using a joint Cochran's Q test and pairwise McNemar's tests, showcasing that despite similar performance levels for the models, with F1 scores around 0.63, each classifier's decisions are statistically distinct from one another.
+
+This practical similarity despite statistically significant differences among the models suggests that the self-reported data, or the predictors used, are limiting factors that keep any one classifier from breaking past the performance threshold. Without precise information about the success rates for the predictive models used by campaigns, passing any final judgement on these models is impossible. However, the biases inherent in self-reported data and the subsequent modest performance of these models show that solely using this form of data to predict donations is impractical. Instead, data will need to be augmented with administrative and private data, which may showcase the underlying tendencies of potential donors that are not clear or hidden intentionally in self-reported surveys, and provide more powerful predictions as a result.
+
+# Examining Donor Motivations
+
+Individuals can be prompted to donate through various tactics; some may respond to a phone call, while others will only donate independently. Most critically, however, is that donors are extremely scarce and systemically different from non-donors. Recent estimates suggest that only about 8.5% of Americans make donations to federal candidates, with less than 2% giving more than \$200 in the 2020 election cycle [@dwyre, pp.32]. This scarcity makes identifying donors challenging and prone to errors, while also depending on the difference between them being known to the campaign. In the absence of any information, a campaign may use a blanket approach with wide-reaching television and radio ads to encourage donors and non-donors to sort themselves (i.e., a donor will see the ad and choose to donate). However, if a campaign is soliciting directly, they need to know how to select donors from the entire pool, which is where the theory behind campaign donations can provide an insightful framework.
+
+The most prominent theory behind donor motivations comes from @francia2003, which has been used and expanded over the past two decades to create a framework for understanding political donors. @francia2003 identify three groups of donors: investors, ideologues, and intimates, [@barber2016; @dwyre, pp.33] all of whom expect some formal return on their donation. Investors view contributions as literal investments, where the return is a personally beneficial policy outcome [@ensley; @francia2003]. Ideologues use contributions to showcase their political alignment, with their return being an ideologically aligned policy [@dwyre, pp.32; @ensley]. Lastly, intimates view donations as a way to engage in a campaign, where the return is a greater level of social prestige [@francia2003; @dwyre, pp.33].
+
+While this theory provides a framework for why people donate, others have raised the question of why people do not donate more. @littlemoney highlights that the level of campaign spending is far below what the U.S. government spends each year. If people saw campaign donations as investments or expected some ideological policy return, then there surely should be more money in each election cycle because of the high stakes. Although the Federal Election Campaign Act (FECA) limits individual contributions, the Supreme Court has ruled in *Buckley v. Valeo* that independent expenditures in elections cannot be limited [@littlemoney], meaning this cannot be a valid explanation for the relatively low spending. For example, 2024 campaign spending was \$15 billion [@glavin], the most expensive to date, but is still a small fraction of the \$960 billion allocated in 2024 for non-defense discretionary spending [@congressionalbudgetoffice2025]. The authors, as a result, propose that political contributions have innate consumption value [@littlemoney], and that people donate because politics is an exciting activity that only occurs every 2-4 years. In this sense, campaign contributions are more like gambling, where the majority of the return comes from simply engaging in the activity, and not the outcome of the bet.
+
+Additionally, recent research suggests that donations are not exclusively an individual phenomenon, but instead can be contagious. According to work by @traag2016, individuals across both parties have an increased tendency to donate when they are exposed to additional donors, and the strength of this effect increases with the number of donors someone is exposed to. An exposure to simply one donor increases someone's chance of donating by 1.7 times, and another 1.23 times for the second exposure [@traag2016]. These effects compound into what are called donor communities, which continue the cycle of exposure further [@traag2016].
+
+# Prior Studies on Donor Behavior
+
+Moving beyond theory, numerous studies provide empirical evidence that can be applied to building a classifier. The factor most commonly identified as having the largest impact on a donation is the alignment of the candidate and voter on policy and ideology [@baker; @barber; @barber2016; @ensley]. These studies take different approaches but still arrive at similar results. Some of these studies use surveys with individually reported data [@baker; @barber; @barber2016], while others instead use aggregate-level data [@ensley; @niebler] to mitigate the self-selection and self-reporting biases that can occur in surveys.
+
+Among the survey-based approaches, @baker uses the publicly available CCES dataset from the 2016 survey to identify donors and then administers a new survey regarding motivations. The goal of the study was to differentiate between the motivations of donors to individual candidates versus donors to parties or political action committees (PACs). @baker finds that donors to candidates are motivated more by civic duty and policy influence, while donors to PACs and parties are motivated more by social networking. @barber2016 and @barber used the Federal Election Commission database to identify donors for a survey, obtaining a response rate of 15% and 13%, respectively. In the first study [@barber2016], the most important motivations were candidate ideology and the desire to influence the election [@barber2016], while the second study highlights the importance of policy alignment when the donor and candidate are from different parties. Additionally, the second study [@barber] highlights a geographical component in Senate races where those who can vote in the race (from the same state) are more likely to donate as well.
+
+From the non-traditional approaches, @niebler combines campaign contributions and advertising data to estimate the impact of negative advertising on donations. They find that donating to the winning primary candidate can increase the probability of a repeat donation by 24% to 33%, but that attack ads within the party during the primary season make people less likely to donate in the general election [@niebler]. @ensley also uses aggregate-level data to test how candidate polarization can impact donations. The results show candidate ideology is one of the most important indicators of donations, even after controlling for opponent ideology [@ensley]. However, the ideological divergence between candidates does not significantly impact fundraising, suggesting that donors do not punish candidates for adopting more extreme policy positions than their opponents [@ensley].
+
+While these studies provide important insights into how donor motivations can manifest during elections, their focus is primarily on inference and not strictly prediction. Many of the factors highlighted may very well be clear causal indicators of a successful political donation, but at the same time, they do not provide enough information to accurately predict a successful donation. Large-scale prediction requires different approaches to be successful [@breiman_twocultures], so it is difficult to directly extend these findings to the prediction task at hand. However, given the limited focus on predictive modelling in political science literature, these results [@baker; @barber; @barber2016; @ensley; @niebler] still provide an important starting point for this classification task.
+
+
+```{r}
+dummys <- recipe(donate ~ ., data = original) |>
+  step_unknown(all_nominal()) |>
+  step_dummy(all_nominal(), naming = dummy_names) |>
+  prep(data = original) |>
+  bake(new_data = original) |>
+  select(!contains("unknown"))
+
+clean_names <- function(x) {
+  x <- gsub("^state", "State: ", x)
+  x <- gsub(" ^employ", "Employ: ", x)
+  x <- gsub("^income", "Income Range  ", x)
+  x <- gsub("^race", "Race: ", x)
+  x <- gsub("^party", "Party ID: ", x)
+  x <- gsub("^educ", "Education: ", x)
+  x <- gsub("^ideology", "Ideology: ", x)
+  x <- gsub("^pol", "Political ", x)
+  x <- gsub("^religion", "Religion: ", x)
+  x <- gsub("^relig_imp", "Religious Importance: ", x)
+  x <- gsub("immigrant", "", x)
+  x <- gsub("marriage", "Marital Status:", x)
+  x <- gsub("interest", "interest: ", x)
+  x <- gsub("_", " ", x)
+  x <- gsub("\\.", ":", x)
+  x <- gsub("mil", "Military Affiliation", x)
+  x <- gsub("voteprior", "Prior Voter", x)
+  x <- gsub("votereg", "Voter Registration", x)
+  x <- gsub("X", "\\$", x)
+  x <- str_replace(
+    x,
+    pattern = "(Income Range \\d+k)\\s+(\\d+k)",
+    replacement = "\\1<\\2"
+  )
+  x <- StrCap(x, method = "word")
+  x <- gsub("^ ", "", x)
+  return(x)
+}
+names(dummys) <- clean_names(names(dummys))
+names(dummys)[81] <- "Income Range Over 150k"
+names(dummys)[85] <- "Income Range Over 500k"
+names(dummys)[14] <- "Home Owner"
+```
+
+```{r}
+
+cors <- cor(dummys, use = "na.or.complete", method = "spearman")
+
+cor_long <- as.data.frame(cors) %>%
+  rownames_to_column(var = "Var1") %>%
+  pivot_longer(cols = -Var1, names_to = "Var2", values_to = "Correlation") %>%
+  filter(Var1 != Var2) %>%
+  mutate(var = map2(Var1, Var2, ~ paste(sort(c(.x, .y)), sep = "_"))) %>%
+  distinct(var, .keep_all = TRUE) %>%
+  select(Var1, Var2, Correlation) %>%
+  arrange(desc(abs(Correlation)))
+
+groups <- c(
+  "Race",
+  "Education",
+  "Marital Status",
+  "Ideology",
+  "Employ",
+  "Party ID",
+  "Citizen",
+  "Political Interest",
+  "Religion",
+  "Religious Importance",
+  "Income"
+)
+factor_groups <- map(
+  groups,
+  ~ {
+    idx <- str_detect(names(dummys), .x)
+    names <- names(dummys)[idx]
+  }
+)
+names(factor_groups) <- groups
+
+
+find_group <- function(x) {
+  lookup <- unlist(
+    map(
+      names(factor_groups),
+      ~ {
+        setNames(rep(.x, length(factor_groups[[.x]])), factor_groups[[.x]])
+      }
+    )
+  )
+  group <- lookup[x]
+  return(group)
+}
+
+cor_long_filtered <- cor_long %>%
+  mutate(group1 = find_group(Var1), group2 = find_group(Var2)) %>%
+  dplyr::filter(group1 != group2) %>%
+  select(Var1, Var2, Correlation)
+```
+
+```{r}
+missing_vars <- miss_var_summary(original)
+names(missing_vars) <- c("Variable", "Number", "Percentage")
+missing_vars$Variable <- c(
+  "News Activites",
+  "Contacted",
+  "Donated",
+  "Political Activities",
+  "Income",
+  "Ran for Office",
+  "Investor",
+  "Parent",
+  "Political Interest",
+  "Recognition",
+  "Religion",
+  "Past Voter",
+  "Home Owner",
+  "Ideology",
+  "Party",
+  "Marital Status",
+  "Immigration Status",
+  "Intent to Vote",
+  "Religion Importance",
+  "Employment Status",
+  "Voter Registration",
+  "Military",
+  "Education",
+  "Race",
+  "Gender",
+  "Union",
+  "Age"
+)
+missing_vars$Percentage <- as.numeric(missing_vars$Percentage)
+missing_cases <- miss_case_summary(original)
+names(missing_cases) <- c("Row Number", "Number", "Percentage")
+```
+
+```{r}
+load(here("envs/model_metrics.RData"))
+```
+
+# Methodology
+
+## Data Description
+
+This paper utilizes data 2006, 2007, 2008, 2010, 2012, 2014, 2016, 2017, 2018, 2019, 2020, and 2022 Cooperative Election Study (CES) surveys, formerly called the Cooperative Congressional Election Study (CCES) [@cces06; @cces07; @cces08; @cces08; @cces10; @cces12; @cces14; @cces16; @cces17; @cces18; @cces19; @cces20; @cces22] combined into a single dataset. Surveys from 2009, 2011, 2013, 2015, and 2021 were removed from the analysis for lacking a question on political donations, making it impossible to label those respondents as donors or non-donors. Data files were accessed directly from their Harvard Dataverse entries using the `Dataverse` API [@dataverse].
+
+The CES is an annual survey with a large number of respondents and a robust sampling methodology. However, as with any form of survey, the CES suffers from immeasurable self-response bias, as respondents cannot be forced to answer every question truthfully or even answer them at all. The aggregated data together contain `r nrow(original)` respondents, with `r round(mean(original$donate, na.rm = TRUE) *100,2)`% identifying themselves as political donors.
+
+I selected variables using the survey questions that were present in all iterations of the survey. This prevented the inclusion of specific policy questions, which the survey changes to match the current political cycle. For example, the 2006 survey [@cces06] contained multiple questions about Iraq policy, while the 2020 survey [@cces20] contained several abortion-related questions. These responses did not have analogs in all surveys, so I could not include them. The loss of this information should be mitigated by access to a larger dataset, but it is possible a classifier could perform better using more specific information and less training data instead.
+
+The dependent variable is donor, a binary indicator (1/Yes = donated, 0/No = not donated), while the selected predictors include a mixture of binary, continuous, and categorical variables. The survey only asks whether a person donated, not the amount or recipient of the contribution, meaning large Super PAC donors and small candidate donors are treated the same. However, these two groups likely differ in important ways, making it potentially difficult for a classifier to accurately capture both types. For example, a small non-repeat donor is likely to be similar to a non-donor, which may cause the classifier to miss many of these small donors or classify many non-donors as donors, because of their proximity to these small donors.
+
+The binary indicators include: male (1 = male, 0 = female), voter registration (1 = registered, 0 = not), union (1 = current or prior union membership or family affiliation, 0 = none), parent (1 = has children, 0 = does not), Contacted (1 = contacted by a political campaign, 0 = not contacted), ran for office (1 = has run, 0 = has not), military affiliation (1 = self or family served, 0 = no family or self military service), prior voter (1 = voted in the previous election, 0 = did not vote), intent to vote (1 = intends to vote in next election, 0 = does not intend to vote), investor (1 = owns stock, 0 = does not own stock), and homeowner (1 = owns home, 0 = does not own their residence).
+
+The categorical variables include: state, race (White, Black, Hispanic, Native American, Other), marital status (single, married, divorced, separated, widowed, or domestic partner), Party ID (strong Republican, Republican, lean Republican, independent, unsure, lean Democrat, Democrat, strong Democrat), immigrant status (born citizen, naturalized citizen, or non-citizen), religion (Protestant, Catholic, Mormon, Jewish, Hindu, Agnostic, Mormon, Buddhist, Muslim, Agnostic, Atheist, Orthodox), and ideology (very liberal, liberal, unsure, moderate, conservative, very conservative). In all of these, the ordering of the levels is arbitrary, and instead, each category represents something different.
+
+By contrast, there is also a set of ordinal variables, where the order of levels is informative, which include: education (no high school, high school, some college, 2 year degree, 4 year degree, post-graduate degree), political interest (none, little, some, most), religious importance (none, little, somewhat, very), and income (treated categorically in income ranges; e.g. \$10K - \$20K or \$150K to \$200K). Earlier surveys capped the highest income at \$150K, while later extended the range to \$500K; this original distinction was preserved in the final dataset because, without exact incomes, they could not be placed correctly into the newer ranges (so, there are two categories as $>$ \$150K and $>$ \$500K).
+
+Lastly, the continuous variables include Age (calculated as survey year minus birth year), Recognition (a count from 0 to 4 of elected officials the respondent recognized), Political Activities (count from 0 to 5, the number of distinct politically active behaviors; e.g. attending a protest, attending a local meeting, etc.), News Activities (count from 0 to 5 based on the number of distinct news media consumed; e.g., cable, internet, radio, etc.). A full table (excluding state) of summary statistics is available in Appendix A.
+
+Each variable provides valuable information for identification. Income and investor measure wealth, which indicates the ability to donate, while political ideology, party ID, political activities, and political interest can reflect different types of political involvement. This follows from the literature, which suggests many donors are politically engaged [@ensley, @barber; @barber2016], and the theory that places ideology as one of the centers of donor motivation [@francia2003]. Additional variables, such as news activities and recognition, act as proxies for political engagement for people who do not explicitly say so on the survey, while identity factors, such as race, age, and education, include other information that can potentially be used to classify donors.
+
+The data was split into an 80% training and a 20% test/holdout set. The classifiers are built using the training data, and the final performance is evaluated on the test data. By taking this approach, the classifier is assessed on data it has never seen before, making results robust to overfitting and replicating the real-world use case where the model is used to make predictions regarding individuals whose status is unknown.
+
+## Data Preparation
+
+Before model training, all of the missing values in the survey dataset were imputed. Although random forest and gradient boosting algorithms can use missing values, logistic regression cannot, reducing the effective data size from `r nrow(original)` to `r nrow(tidyr::drop_na(original))`. This significant loss of data would have adverse effects on model performance, so values were imputed instead. Despite the large amount of individuals with missing values, the overall level of missingness is low: total missing data is only `r round(mean(missing_cases$Percentage),2)`% of the data, and each person has on average `r round(mean(missing_cases$Number),0)` missing value out of 27 variables.
+
+For the imputation procedure, I assume the data is Missing at Random (MAR), indicating the missingness of the data is unrelated to unobserved values and depends only on the observed values [@memon; @memon2022; @zhang; @vink; @austin]. This is an essential assumption for imputation, but may not necessarily be true given the self-reported nature of the survey. In the context of the survey, a missing value is likely someone refusing to answer a question, given that we cannot know the nature of their refusal, its likely the missing data in some cases could be Missing Not at Random (MNAR), whereby the missing value depends on only unobserved data, in which case its unlikely an imputation procedure could be effective.
+
+Looking at @tbl-gliv, containing the top 5 and bottom 5 variables in the dataset by number of missing values, it is clear there is an uneven distribution of missingness throughout the dataset. Political activities, contacted, income, donated, and news activities all contain around or over 70,000 missing values, but the variables state, race, gender, and age all have around 0. Although it is possible for missing data to come from data storage or survey administration issues, given this clear uneven distribution, it is highly likely that many respondents are deliberately keeping information regarding their wealth and political habits hidden from the survey by leaving questions blank. However, it is still possible that information about these missing values can be gleaned from others within the data, so I chose to continue the procedure. The only variable that was not imputed was donate, as assessing the performance using imputed outcomes could potentially over- or underestimate the success of the models, so all observations with missing values for donate were removed, resulting in a new dataset size of `r nrow(train) + nrow(test)`. A full table, showcasing the missingness for all variables, along with a detailed explanation of missing data, is available in Appendix A.
+
+Typical imputation methods include K-nearest neighbors (KNN), multiple imputation by chained equations (MICE), random forest, median, mean, and mode. KNN is regarded as the most accurate imputation method [@memon; @memon2022], but it is computationally expensive for high-dimensional categorical data like mine. I chose MICE instead because of its consistent performance on imputation and classification tasks in the literature [@memon; @memon2022]. MICE imputes each value multiple times to account for the uncertainty in a singular point estimate, effectively bootstrapping a simple distribution instead of simply making one imputation.
+
+```{r}
+#| output: 'asis'
+#| tbl-cap: "Glimpse of Missing Variables"
+#| label: tbl-gliv
+gliv <- as.data.frame(rbind(head(missing_vars, 5), tail(missing_vars, 5)))
+stargazer(
+  gliv,
+  summary = FALSE,
+  digits = 2,
+  header = FALSE,
+  float = FALSE,
+  font.size = "small",
+  notes = "Top 5 and Bottom 5 Variables Sorted by Number of NA Values",
+  notes.align = "l",
+  table.placement = "H"
+)
+```
+
+I implemented MICE using the `mice` package in `R` [@mice], which by default uses all other variables for imputations (Full Specification Model) and Bayesian estimation for the imputation equations. Details on how the `mice` package performs imputations can be found in Appendix A and the `mice` documentation. I conducted imputations on the training data and test data separately to prevent data leakage [@lones], and made 50 imputations for each missing value. Instead of then analyzing all the separate datasets and pooling the variation, I instead chose the final imputation as the center of the distribution for each imputed value. For unordered categorical variables, this was measured by frequency, but for the other variables, the median was used. It would have been too computationally expensive to train the following models across the 50 datasets, so choosing the center of the distribution of each imputed value allows for just one dataset, using the estimated imputation, which is most likely to be the best based on the procedure.
+
+The imputations took 8.3 hours to complete using American University's High Performance Computing Cluster. It is also important to note that research involving imputation methods is only done using very specific datasets where missingness is synthesized by researchers. It is unknown whether these methods will perform in similar ways for all datasets. Additionally, evidence shows that classifiers can perform better when data has been imputed less accurately, underscoring that this is an experimental procedure (despite standard usage) to be taken with uncertainty and caution [@memon; @memon2022].
+
+```{r}
+donor_pct <- round((sum(train$donate == "Yes") / nrow(train)) * 100, 2)
+donor_weight <- as.numeric(round(train$weights[train$donate == "Yes"][[1]], 4))
+non_donor_weight <- as.numeric(round(
+  train$weights[train$donate == "No"][[1]],
+  4
+))
+```
+
+After imputing values, class weights were introduced to address the imbalance within the dataset. Only `r donor_pct`% of the dataset are labelled as political donors, so if all observations were treated equally, the models will learn more information from the non-donors, and then struggle to handle the donors, which are in the minority [@kuhn2016a]. However, case weights can effectively control how much a model learns from each observation, so by assigning members of the minority class higher weights than the majority class, the class imbalance can be rectified. To calculate the weights, I used the SBCW method from @bakirarar, which scales the weights based on the number of classes and the number of units in each class. Each weight, $W_i$, can be calculated as: $W_i = \frac{N}{2 * n_i}$, where $N$ is the number of total respondents, $n_i$ is the respondents per class, $i \in \{0, 1\}$, and the number of classes is 2. Using this formula, the resulting weights are `r donor_weight` for donors, and `r non_donor_weight` for non-donors.
+
+## Model Specification and Hyperparameter Tuning
+
+Using the imputed data, I built and tested three classification models: a logistic regression, a random forest, and a gradient boosted forest. Logistic regression is a simple parametric model estimated via Maximum Likelihood Estimation (MLE) [@james2013], which involves choosing the parameter values that maximize the likelihood function. Random forests and gradient boosted forests, by contrast, are ensemble methods built from Classification and Regression Trees (CART; decision trees). These trees attempt to optimally split observations based on their labelled outcome, given predictors, and splitting criterion until their stopping point is reached, at which a prediction is made for each observation based on the final/leaf node the observation was separated into [@james2013a]. Random forests extend decision trees by training many of them in parallel, then averaging the results [@breiman_random], while gradient boosted trees build trees sequentially, each tree trained on the errors of the previous tree to iteratively minimize a given loss function, and then the predictions are added together for the final result [@friedman2001; @chen2016; @ke2017].
+
+Each of the following algorithms are presented below mathmatically, where $\hat{y}_i$ is the estimated probability of being observation $i$ being a donor,  $i \in \{1, 2, 3, \dots, N\}$, N is the total number of observations, and $\symbf{x}_i$ is the vector of predictor variables for observation $i$. More information about these algorithms can be found in Appendix B.
+
+\begin{center}
+\begin{align}
+\hat{y}_i &= \frac{1}{1 + \exp\left( -\symbf{x}_i^\text{T} \symbf{\beta} \right)}
+\tag{Logistic Regression} \\
+\hat{y}_i &=  \frac{1}{N} \sum_{j=1}^N f_j(\symbf{x}_i) = \frac{\text{Tree}_1 + \text{Tree}_2 + \cdots +\text{Tree}_N}{N}\tag{Random Forest} \\
+\hat{y}_i &= f_0(\symbf{x}_i) + \sum_{t=1}^N f_t(\symbf{x}_i) = \text{Initial Guess} + \text{Tree}_1 + \text{Tree}_2 +\cdots +\text{Tree}_ N \tag{Gradient Boosting}
+\end{align}
+\end{center}
+
+As a result of the additional complexities in random forests and gradient boosted trees, both models have several hyperparameters, which are internal settings that influence the training process. Not to be confused with parameters, which are estimated in the training process for a model like logistic regression. Because of their influence on the training process, these hyperparameters need to be tuned properly for the model to perform optimally.
+
+To find the optimal hyperparameter values, I used 10-fold cross-validation (CV). Cross-validation is a standard method supported by vast literature [@caret_book; @arnold; @probst; @lones; @bergstra; @raschka], providing a robust method to test multiple hyperparameter combinations using the training set of data. 10-fold CV works by splitting the training data into 10 portions, for which each model is trained using 9 folds and validated using the remaining fold [@raschka; @grimmer]. This process is repeated until each fold has been used to validate once, and then the performance metric is averaged. This allows for combinations to be tested without using the holdout set of data, and accounts for the variance in the data and model training for each hyperparameter combination [@lones]. Here I've chosen the F1 score as the criterion to maximize, because it is a composite measure which captures the trade off between recall (how many of the total positive class was found) and the precision (how many of the chosen positive classes were truly positive) of the model.
+
+The hyperparameters tested in the CV were first chosen using a random search, and then further refined using Bayesian optimization. An initial random grid of hyperparameters was specified, and then, using the results of the Bayesian optimization routine, a Gaussian Process was used to find combinations that have a high probability of maximizing the objective [@wu2019]. Random search is powerful because it allows for a breadth of the hyperparameter space to be searched [@bergstra], while Bayesian optimization can use the results to hone in on even better options. For the random forest, 100 initial random hyperparameter combinations were used, while for boosted trees, 150 were used to reflect the larger number of tunable hyperparameters. For both models, Bayesian optimization ran for 50 iterations, with it set to stop after 25 consecutive iterations with no improvements. More information about the hyperparameters for the specific models and the results of the tuning process is available in Appendix C.
+
+Overall, the tuning process for the random forest took `r round(tuning_time[[1]] / (60^2), 2)` hours while the boosted trees only took `r round(tuning_time[[2]] / (60^2), 2)` hours on American University's HPC Cluster. However, the training times for the final models were much shorter, with the random forest taking `r round(training_time[["rf"]])` seconds, the boosted trees taking `r round(training_time[["gbm"]])` seconds, and the logistic regression (which did not require any hyperparameter tuning) taking `r round(training_time[["logit"]])` seconds.
+
+All analysis was conducted in `R` Programming Language versions 4.4.2 and 4.5.1 [@rcoreteam2024] using the RStudio IDE [@positteam2020]. Cross-validation, hyperparameter tuning, and all model evaluation steps were performed using the `tidymodels` [@kuhn2020] suite of packages. Random forests were implemented through `ranger` [@ranger], and gradient boosted trees through `lightgbm` [@shi2025]. Missing Data imputation was achieved via `mice` [@mice]; all computationally intensive procedures were done using American University's High Performance Computing Cluster. Additionally, this paper also relied on the `Tidyverse` [@wickham2019], `gridExtra` [@auguie2017], `naniar` [@naniar], `DescTools` [@desctools], `stargazer` [@hlavac2022], `rpart` [@therneau2025], `rpart.plot` [@milborrow2024], `haven` [@wickham2023], `here` [@muller2020], `BDSA` [@arnholt2023], `usmap` [@lorenzo2024], `vip` [@greenwell2023], `rstatix` [@kassambara2023a], and `dataverse` [@dataverse] packages for data cleaning, analysis, visualization, and presentation.
+
+# Results
+
+## Test Set Performance
+
+Each model was evaluated using accuracy, precision, recall, F1, and the area under the ROC curve (ROC-AUC) on the test set of observations that was held out from training. Accuracy is the proportion of correct classifications, precision is the proportion of predicted positives that are true positives, while recall is the proportion of total positives identified. F1 is the harmonic mean of precision and recall, offering a balance between the two most important metrics, and ROC-AUC is the area under the Receiver Operating Characteristic curve (ROC), which is the probability of the model correctly distinguishing observations when given one from each class [@erickson]. Full Formulas adapted from @erickson are below, where TP is true positive FP is false positive, FN is false negative, FP is false positive:
+
+\begin{center}
+\begin{align*}
+\text{Accuracy}  &= \frac{\text{Correct}}{\text{Total}} \\
+\text{Recall}  &=\frac{\text{TP}}{\text{TP} + \text{FN}} \\
+\text{Precision}  &=\frac{\text{TP}}{\text{TP} + \text{FP}} \\
+\text{F1 Score}  &= \frac{2\text{TP}}{2\text{TP}+\text{FP}+\text{FN}}\\
+\end{align*}
+\end{center}
+
+Each metric captures the different strengths of a classifier. For donor prediction, recall is particularly important because the campaign wants to capture all donors in the donor space. However, precision also matters because poor precision wastes the campaign's resources and diminishes the utility of the classifier. Test set results are summarized in @tbl-test and visualized through ROC curves in @fig-roc. All classifiers were evaluated using a 0.5 threshold for positive cases.
+
+```{r}
+#| output: 'asis'
+#| tbl-cap: "Test Set Performance"
+#| label: tbl-test
+
+metrics$Metric[1:4] <- str_to_title(metrics$Metric)[1:4]
+metrics$Metric[5] <- "ROC-AUC"
+metrics$Metric[10:12] <- str_to_title(metrics$Metric)[10:12]
+metrics <- metrics |>
+  rename(
+    "Logistic Regression" = logit,
+    "Gradient Boosted Trees" = gbm,
+    "Random Forest" = rf
+  )
+
+
+stargazer(
+  as.data.frame(metrics),
+  summary = FALSE,
+  digits = 4,
+  header = FALSE,
+  float = FALSE,
+  font.size = "small",
+  notes = "Performance Summary: F1, ROC, Recall, Precision, Accuracy are [0,1]. Others are counts",
+  notes.align = "l"
+)
+
+x <- rep("No", nrow(test)) |> as.factor()
+levels(x) <- c("No", "Yes")
+no_info <- accuracy_vec(test$donate, x)
+```
+
+Each classifier performed similarly, with ROC-AUC ranging from 0.84 to 0.85, accuracy from 76% to 79%, and F1 scores around 0.63 - 0.64. Overall, the logistic regression performed worse than the gradient boosted trees and the random forest in almost every metric, while the gradient boosted trees and the random forest each have their own strengths. Recall for the gradient boosted trees is 0.771, while for the random forest it is 0.717, indicating that the gradient boosted trees were able to capture 77% of the true donors, while the random forest only captured 71%. However, in terms of precision, the gradient boosted trees only score 0.545, while the random forest scores 0.576, indicating that the random forest had fewer false positives than the gradient boosted trees. Moving to the count portion of the table makes these trade-offs clearer. The random forest classified around 1200 fewer true positives than the logistic regression and gradient boosted trees, but was able to correctly classify around 2700 more true negatives, and as a result had around 3000 fewer false positives when compared to the other two models. In terms of the F1 score, the gradient boosted trees and random forest are the same up to 3 decimal places, only beginning to diverge at the 4th, with scores of 0.6383 and 0.6386, respectively. The closeness of these metrics makes it difficult to choose a single best classifier, but if the goal is to capture as many donors as possible, with a high tolerance for false positives, then the gradient boosted trees are the best, but if the goal is to be more precise with a lower tolerance for errors, than the random forest would provide better performance. Ultimately, choosing the proper model depends on the circumstances and goals, and a wise decision would be to use multiple models and assign higher weights to instances where they produce the same prediction, and scrutinize cases in which they differ. Additionally, confusion matrices for each classifier, showcasing the exact classifications of each model, are available in Appendix D.
+
+## Statistical Tests
+
+Each classifier draws its own decision boundary when classifying the data, indicating the internal decision process of each model. Despite the differences in performance, it is possible for these boundaries to still be similar enough that each model can be considered to be the same, as in making the same decisions. To test for this, following the advice of @raschka, the Cochran's Q test is used. The Cochran's Q test is similar to an ANOVA, and jointly compares each model's decision on each observation to test if they classify each observation in the same way. The null hypothesis for this test is that there is no difference in each model's accuracy, while the alternative is that at least one of the accuracies is different. Formally, $H_0: ACC_1 = ACC_2 = ACC_3$ and $H_a: \exists \ i \neq j \text{ such that } ACC_i \neq ACC_j \text{, for } i,j \in \{1,2,3\}$. Performing this test with an $\alpha = 0.05$, the resulting p-value is `r options(scipen = 1, digits = 2); CochranQ$p`, which for all general purposes is 0. Therefore, the null hypothesis can be rejected.
+
+Following this rejection, I conducted pairwise McNemar tests to compare each individually. The McNemar's test is the binary case of the Cochran's Q (The t-test to the ANOVA) [@raschka]. Using the same $\alpha = 0.05$ I conduct the following tests with the $H_0: ACC_i = ACC_j \ \ H_a: ACC_i \neq ACC_j$, for all possible pairs $(i,j)$ where $i < j \text{, and } i,j \in \{1,2,3\}$. The p-value comparing the gradient boosted tree to the logistic regression is  `r McNemar$p[1]`, comparing the boosted trees to the random forest is `r McNemar$p[2]`, and comparing the logistic regression to the random forest is `r McNemar$p[3]`. All of these p-values are less than $0.05$, so in all cases I reject the null hypotheses, and conclude with the evidence from all 4 tests that the classifiers have distinct decision boundaries. The p-values were not adjusted to account for running 4 tests (The family-wise error rate under 4 tests is `r (1-0.95^4) * 100`%), but the p-values reported here are so low they would still be significant under p-value adjustments. With the stated $\alpha = 0.05$, each of these p-values could be multiplied by $10^{35}$, and each null hypothesis would still be rejected.
+
+## The General Case
+
+Determining whether or not these models are useful is difficult. First, their ROC-AUC scores all lie around 0.85, indicating an 85% chance each model can properly distinguish between 2 observations of different classes. This is better than simply selecting randomly, which would result in an ROC-AUC of 0.5. Shown below in @fig-roc is the physical ROC curve for each classifier, along with a dashed dotted line representing the baseline random selection case. However, this score does not capture the complete utility of the model in a real-world scenario. This 85% differentiation rate only applies when we know the model has received one observation of each class, not when it is tasked with sifting through an entire sample space of data.
+
+When this generalization is considered, model performance falters somewhat. Looking back at the recall and precision in @tbl-test, it is clear that the models have some deficiencies. For one, the recall scores ranging from 0.71 to 0.77 indicate that only 71% to 77% of donors are being properly identified. This leaves 23% to 29% of donors completely missed by the campaign, potentially losing them significant funds, and could tip the tide of a competitive election. However, what's more disconcerting is the precision rates around 0.55. These rates indicate that nearly 45% of the identified donors are misclassified and are non-donors instead. Therefore, if a campaign were using these models to actively select who to spend campaign resources soliciting, they would still be wrong 45% of the time, assuming that a correctly predicted donor will donate on solicitation, wasting the resources that the model was supposed to save. Obviously, these rates can also be seen as optimistic, and 45% of predicted positives being false positives is better than an approach where it is 60% or 80% and capturing 70% of donors is still better than 20% or 30%. However, without any baselines in literature or from real campaigns, it's difficult to conclude exactly how successful these models truly are. Campaigns, though, have already switched to using private forms of data from private data brokerages [@nickerson2014; @walker2021] for more precise targeting, suggesting this blanket approach using purely self-reported data is not optimal for finding high probability donors. With the large resources campaigns have, they likely have the data capabilities to build exclusive sets of models by state or other jurisdiction area, to target voters and potential donors even more effectively [@nickerson2014; @walker2021]. Whether or not these specific models have any utility depends on their comparison to current tactics and a candidate's access to more precise forms of data.
+
+```{r}
+#| output: TRUE
+#| fig-cap: "ROC Curves for All Models: Models Improve as ROC Curve Trend to left Corner"
+#| fig-cap-location: top
+#| label: fig-roc
+
+grocs <- imap(
+  rocs,
+  ~ {
+    .x |> mutate(model = .y)
+  }
+) |>
+  bind_rows() |>
+  mutate(selectivity = 1 - specificity) |>
+  ggplot(aes(x = selectivity, y = sensitivity)) +
+  geom_line(aes(color = model)) +
+  geom_abline(
+    slope = 1,
+    intercept = 0,
+    color = "dodgerblue4",
+    linetype = "longdash",
+    alpha = .6
+  ) +
+  labs(x = "Selectivity (1 - TNR)", y = "Recall (TPR)") +
+  facet_grid(
+    ~model,
+    labeller = labeller(
+      model = c(
+        logit = "Logistic Regression",
+        rf = "Random Forest",
+        gbm = "Gradient Boosted Trees"
+      )
+    ),
+    switch = "x"
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "none",
+    panel.spacing = unit(1, "lines"),
+    strip.background = element_blank(),
+    strip.text = element_text(face = "bold"),
+    panel.grid.minor = element_blank(),
+    plot.title = element_text(hjust = 0.5),
+    strip.placement = "outside",
+    axis.title = element_text(size = 11),
+  )
+grocs
+```
+
+## Variable Contributions
+```{r}
+var_imp2 <- map2(
+  var_imp,
+  c("Logit", "Random Forest", "Gradient Boosted Trees"),
+  ~ {
+    .x$Variable[.x$Variable == "immigrant"] <- "Immigration Status"
+    .x |>
+      mutate(Variable = clean_names(Variable), Model = .y) |>
+      rename(N = N_Importance)
+  }
+)
+var_imp2 <- full_join(var_imp2$logit, var_imp2$rf, by = "Variable") |>
+  full_join(var_imp2$gbm, by = "Variable") |>
+  rename(
+    "Importance Logit" = Importance.x,
+    "Importance Random Forest" = Importance.y,
+    "Importance Gradient Boosted Trees" = Importance
+  ) |>
+  select(Variable, starts_with("Importance"))
+```
+
+```{r}
+#| output: 'asis'
+#| tbl-cap: "Permutation Variable Importance by Model"
+#| label: tbl-imp
+stargazer(
+  as.data.frame(var_imp2),
+  summary = FALSE,
+  header = FALSE,
+  digits = 4,
+  font.size = "footnotesize",
+  float = FALSE
+)
+```
+
+Further understanding classifier performance requires evaluating the role predictors play in each classification decision. For all 3 methods, the permutation method of variable importance is used to find the most and least significant variables. Permutation importance assesses each variable by randomly shuffling the values within and then predicting with the new data. If the accuracy significantly changes from this shuffling, it indicates the model was using that variable as a signal to separate the classes, and now that the variable is no longer correlated with the class, it no longer provides useful information, resulting in a lower accuracy rate [@greenwell2020].
+
+@tbl-imp below shows the variable importances for each of the models, calculated from the test set of data. The top variable by importance is consistent for all 3 models, which is political activities, the count of politically active events undertaken by respondents in the past year. For all models, this was around 5%, which corresponds to about 4000 additional misclassifications when randomly permuted. All the other variable importances for the models are below 1%, indicating they all result in less than `r round(0.01 * nrow(test))` additional misclassifications. Other variables that are particularly important are news activities, contacted, age, party identification, and income. However, the level of importance these variables have differs across the models. For example, age is particularly prominent for the boosted trees, with about 1% importance, but not in the logistic regression or random forest. Another would be party identification, which has about 0.5% importance (correlating to `r round(0.005 * nrow(test))` additional misclassifications), in both the logistic regression and random forest, but is negative for the boosted trees, indicating randomly permuting it improved correct classifications. Other variables with negative importance are ideology (boosted trees), voting intent (random forest), parent (logistic regression), political interest (logistic regression, and boosted trees), union membership (logistic regression, and boosted trees), prior voter (random forest, and boosted trees), employment status (logistic regression, and random forest), etc. This cross-model behavior is puzzling but simply reinforces the fact that each classifier has its own distinct decision boundary, with different variables playing different roles. This is especially the case with the random forest and gradient boosted trees, because of the role random variable subsets play in splitting the hundreds of trees in each model. Given these differences, it's impossible to conclude that any of the variables, which have different signs of their importance across the models, are useful for predicting donor behavior in the general sense.
+
+Comparing back to the literature, it seems as though the general theories surrounding donor behavior have held. Measures of political activity and wealth have the most predictive power within each of the models; however, it seems that most of the other variables have little to no predictive power at all. Additionally, not all political activity is useful for predictions. Political activities, the variable indicating attendance at types of physical political events, has the most power in predicting, while a variable like political interest, which is simply self-reported interest, is extremely low or negative in all the models. This disconnect can come from the self-reported nature of the survey or just from the question. Each respondent judges their own political interest, so comparing it is much easier for people to understate or overstate their interest compared to others, making cross-comparisons difficult. In contrast, for political activities, it is simply a series of questions asking, *Did you attend **enter event here** in the past year*, which is not subjective, thereby making it more consistent across the whole pool of respondents. However, this could also indicate that being an activist and attending political events, as is more associated with donating than simply being interested in politics, as suggested by the theory [@francia2003]. Another important discrepancy is the disconnect between political activities and variables relating to voting. Variables like prior voter, voting intent, and voter registration provide little to no predictive power in the models. Simply being an active voter is not enough information for the model to discern donations, which makes sense considering only a small fraction of Americans donate every cycle compared to those who vote.
+
+Altogether, these results reveal that a small group of predictors representing general political engagement and income level holds the most power over each model's results. These variables align with the most commonly cited indicators of donation propensity [@ensley; @niebler; @baker; @barber]. However, despite this, these variables can still only provide a small amount of predictive power to the models. The overall performance of the models is modest and inconclusive, highlighting the difficulty of using pure self-reported survey data for complex prediction tasks. While donor behavior has a strong theory behind it, predicting it effectively remains a difficult task, especially in situations where the data used is prone to forms of self-response bias.
+
+# Discussion
+
+The goal of this study was to apply basic machine-learning techniques to develop a classifier capable of predicting donor behavior using only self-reported data. Such a model would offer real-world utility, highlight the key factors influencing individuals' decisions to donate, and showcase whether self-reported data, plagued with issues like self-response bias, could be used effectively for this purpose. While the training process was a success, the applicability of these specific models remains uncertain. Theoretically, from the ROC-AUC score, each classifier can differentiate donors from non-donors far better than a random classifier and likely a person as well. However, a closer look shows that the classifiers are flawed, missing a large percentage of donors, and falsely classifying a significant number of non-donors as donors. The prevalence of these false positives and false negatives makes it challenging to fully recommend using any of these classifiers in an applied setting, but the lack of a benchmark from literature or the field means reaching any definitive conclusions is impossible at this time.
+
+It is possible that performance can be marginally improved by using different learning algorithms, imputation methods, or through dimensionality reduction, but the similarity in practical performance suggests across all three models, suggests either data or the predictors used are the limiting factors As for the predictors, their strong theoretical and empirical backing did not lend well to the prediction task, only modestly effective when combined. Truly distinguishing between donors and non-donors might require different features that have yet to be identified. However, on the data side, the self-reported nature of the survey introduces issues of self-response bias into all of the responses, making it difficult to believe in the credibility of both the responses and of the missing data imputations, which filled up to 70,000 values for some variables. Taking this approach for this work has revealed the flaws inherent in solely relying on this form of data for predicting complex and rare outcomes like political donations, which is why campaigns have moved beyond this stage already.
+
+The assumptions of the modeling process also warrant critical reflection. Within this dataset, individuals are categorized strictly as donors or non-donors, with no intervention possible to change their choice. This framing assumes campaigning and fundraising are two distinct actions that campaigns practice, whereas fundraising only serves to help the campaigning. In this assumption, the campaign is only incentivized to reach out to those with the highest probability of donating and then use those funds to attract voters. In practice, campaigning and fundraising are two sides of the same coin, where fundraising events energize voters and donors at the same time. If the campaign is too effective at direct solicitation and neglects these key events, it could suffer at the ballot box on election day. Moreover, this general model overlooks the ability of campaigns or others to persuade non-donors to contribute. Research shows that political donations are socially contagious and that exposure to donors of either party can increase an individual's propensity to donate. Therefore, it's entirely possible that someone who, accordingly to all of these models, has a low propensity to donate, or is similar to other non-donors, will actually donate because their others around them have donated, which is not accounted for in this dataset [@traag2016]. Additionally, the goal of a campaign is to be persuasive, showing voters that a candidate will represent their interests, meaning that a campaign is not just searching for donors out in the possible space of voters, but instead is actively convincing people to give and take a chance on their candidate.
+
+Nevertheless, these limitations do not render this work irrelevant. This study represents only the first academic attempt at exploring a predictive approach to donor behavior, and as such, it is expected to have flaws. Despite this, it still serves as a valuable starting point for applying machine learning techniques in political science research. While the individual classifiers are far from perfect, they still perform modestly enough to be used cautiously. Future research in the field needs to address the current disconnect between the current causal motivations for donating and the variables necessary to predict them. Researchers should be prepared to move forward with new study designs that can capture more targeted data in a way that is both ethical and limits the plague of self-response bias, to test whether these variables see their predictive power increase. Additionally, researchers should also be prepared to search for new features entirely, which could clarify a model's decision boundary. Without making any of these strides or changes, it is highly unlikely that any future attempt at this task would have better results.
+
+\newpage
+
+# Acknowledgements
+Computing resources for this work were provided by the American University High Performance Computing System.
+
+# References
+:::{#refs}
+:::
+
+\newpage
+# Replication
+The [GitHub Repository](https://github.com/Noch05/predict_donor_behavior) for this project is public, and has all the code used to produce the project, along with a guide for replication.
+
+# Appendices
+
+Supplemental information is available in the following appendices:
+
+**Appendix A**: Data Processing
+
+**Appendix B**: Machine Learning Algorithms
+
+**Appendix C**: Hyperparameter Tuning
+
+**Appendix D**: Supplemental Results
+
+# Appendix A: Data Processing
+
+## Summary Table
+
+```{r}
+#| output: 'asis'
+#| tbl-cap: "Summary Statistics For Selected Varaibles, Excluding State"
+#| label: tbl-sum
+summ <- imap(
+  dummys,
+  ~ {
+    tibble(
+      Variable = .y,
+      N = sum(!is.na(.x)),
+      Mean = mean(.x, na.rm = TRUE),
+      `St. Dev.` = sd(.x, na.rm = TRUE),
+      Min = min(.x, na.rm = TRUE),
+      Max = max(.x, na.rm = TRUE)
+    )
+  }
+) |>
+  bind_rows()
+
+kable(summ) |> kable_styling(font_size = 5)
+```
+## Missing Data
+
+Missing data can be categorized as Missing Completely at Random (MCAR), Missing at Random (MAR), or Missing Not at Random (MNAR) [@memon; @memon2022; @zhang; @vink; @austin]. MCAR occurs when the missingness is unrelated to any of the observed or unobserved values. MAR occurs when missing values depend only on observed data. MNAR occurs when the missing value depends on the unobserved data. For example, missing income data would be MCAR if someone accidentally skipped the question, MAR if all the younger people systematically skipped the question, or MNAR if wealthy people systematically skipped the question. Imputation methods are typically only robust when the missingness is MCAR or MAR [@memon; @memon2022] because in these cases, other information in the data can provide information about the missing value, while in cases where missingness is MNAR, that information is not available for an imputation model to use. Additionally, imputation methods can perform better when the overall level of missingness in a dataset is low.
+
+```{r}
+#| output: 'asis'
+#| tbl-cap: "All Missing Variables"
+#| label: tbl-miss
+stargazer(
+  as.data.frame(missing_vars),
+  summary = FALSE,
+  digits = 2,
+  header = FALSE,
+  float = FALSE,
+  font.size = "small"
+)
+```
+
+## MICE
+
+In the `mice` package in `R` [@mice], continuous values are imputed by predictive mean matching (PMM), which first estimates a linear model on the missing value, then selects 5 donor cases selected by their distance to the linear model's prediction for the missing values. Then one of these donor cases is randomly selected as the imputed variable. For binary variables, the probability of the missing value being "1" is estimated, and then that probability is used as the probability of success in a Bernoulli trial to determine the imputed value. For categorical variables, the process is the same, but a polytomous regression (multi-category logistic model) is used to predict probabilities for each category. More details of each method can be found in the `mice` documentation and accompanying Journal of Statistical Software paper [@mice; @buuren2011].
+
+## Multicollinearity Concerns
+
+Multicollineraity occurs when predictors are highly correllated, and can be a potential concern in modelling. Highly
+collinear variables can affect the convergence of the algorithms which compute the models [@caret_book], but only in extreme circumstances. @tbl-cor below shows the the top 10 pariwise correlations by absolute value among the predictors. The highest correlation is only 0.451, which is not close enough to -1 or 1, to cause computational issues. The full table is prohibitvely large, and is excluded, but is available upon request.
+
+```{r}
+#| output: 'asis'
+#| tbl-cap: "Top 10 Pairwise Correlations within Predictors"
+#| label: tbl-cor
+cor <- as.data.frame(head(cor_long_filtered, 10))
+stargazer(
+  cor,
+  summary = FALSE,
+  header = FALSE,
+  float = FALSE,
+  digits = 2,
+  notes.align = "l",
+  font.size = "small"
+)
+```
+
+\newpage
+
+# Appendix B: Machine Learning Algorithms
+
+## Logistic Regression
+
+Logistic regression is a parametric model estimated via Maximum Likelihood Estimation (MLE), which involves choosing the parameter values which maximize the likelihood function created by the data and the model's assumptions. Commonly this task is reframed as minimizing the negative log-likelihood function (also known as binary-cross entropy) instead. Below is a derivation of the log-liklihood function.
+
+Let $\symbf{y}$ be a vector of $n$ independent Bernoulli random variables, where $\pi_i$ is the probability that $y_i = 1$, and $i \in \{1,2, 3, \dots, n \}$. The probability mass function for each $y_i$ and the corresponding log-likelihood function is below, where $\symbf{\beta}$ is the vector of coefficients.
+
+\begin{align}
+f_i(y_i) &= \pi_i^{y_i}(1 - \pi_i)^{1 - y_i}  \tag{Definition of $f_i(y_i)$} \\
+\mathcal{L}(\symbf{y}, \symbf{\beta}) &= \prod_{i=1}^n f_i(y_i) \tag{Independence assumption} \\
+\ln{\mathcal{L}(\symbf{y}, \symbf{\beta})} &= \ln \left( \prod_{i=1}^n f_i(y_i) \right) \tag{$\ln$() of both sides} \\
+\ln \mathcal{L}(\symbf{y}, \symbf{\beta}) &= \sum_{i=1}^n \ln f_i(y_i) \tag{$\ln(ab) = \ln(a) + \ln(b)$} \\
+\ln \mathcal{L}(\symbf{y}, \symbf{\beta}) &= \sum_{i=1}^n \ln \left( \pi_i^{y_i} (1 - \pi_i)^{1 - y_i} \right) \tag{Substitute $f_i(y_i)$} \\
+\ln \mathcal{L}(\symbf{y}, \symbf{\beta}) &= \sum_{i=1}^n \left[ y_i \ln \pi_i + (1 - y_i) \ln (1 - \pi_i) \right] \tag{$\ln(a^b) = b\ln{a}$}
+\end{align}
+
+## Decision Trees
+An example decision tree is presented below, showcasing the way in which observations are split along different crieria to ultimately predict their outcome. This example uses randomly generated data.
+
+```{r}
+#| output: TRUE
+#| fig-cap: "Example Decision Tree: Whether or not a student passes their class based on study hours per week and class attendance."
+#| fig-subcap: "The tree makes several splits attempting to separate those who fail from those who passed. At the end each node shows the predicted class, the probability of the class being 'Pass', and the percentage of the data at each node."
+#| label: fig-t
+#| fig-cap-location: top
+#| fig-width: 4
+#| fig-height: 2.5
+set.seed(5)
+Study_Hours <- round(runif(1000, 0, 12)) + 1
+Attends_Class <- rbinom(1000, 1, 0.6) == 1
+Passed_Exam <- case_when(
+  Attends_Class & Study_Hours >= 12 ~ rbinom(1000, 1, 0.9),
+  Attends_Class & Study_Hours >= 6 & Study_Hours < 12 ~ rbinom(1000, 1, 0.7),
+  Attends_Class & Study_Hours < 6 ~ rbinom(1000, 1, 0.4),
+  !Attends_Class & Study_Hours >= 12 ~ rbinom(1000, 1, 0.6),
+  !Attends_Class & Study_Hours >= 6 & Study_Hours < 12 ~ rbinom(1000, 1, 0.3),
+  !Attends_Class & Study_Hours < 6 ~ rbinom(1000, 1, 0.1)
+) ==
+  1
+
+ex_tree_data <- tibble(
+  `Study Hours` = Study_Hours,
+  `Attends Class` = Attends_Class,
+  `Passed Class` = if_else(Passed_Exam, "Yes", "No")
+)
+
+ex_tree <- rpart(
+  `Passed Class` ~ `Study Hours` + `Attends Class`,
+  data = ex_tree_data,
+  method = "class"
+)
+rpart.plot(ex_tree)
+```
+
+## Random Forest
+
+Random forests extend on decision trees in a number of important ways. Most importantly, random forests train multiple trees, and average the predictions of all the trees instead of relying on just one. Combined with a technique called bagging [@breiman_random], this makes random forests robust to overfitting which can plague traditional decision trees. Bagging is a process by which the data is sampled with replacement for each tree, resulting in each tree getting a different dataset to make predictions with. Additionally, while decision trees typically use all variables at once when attempting to split a node, random forests do not. Instead a randomly selected subset of predictors is used at each node, this also workes to increase the randomness in the tree building procedure which has been shown to have better results [@breiman_random]. The number of these randomly selected predictors is typically a hyperparameter of the model, selected by the current user.
+
+In this paper, the `ranger` [@ranger], implementation of the random forest algorithm is used, which has three hyperparameters: mtry, the number of randomly selected predictors used at each node to make splits, trees, the number of trees to use, and min node size, the minimum size required to split a node. This last hyperparameter is effectively an early stopping mechanism, as when set to a high value trees will be forced to end early once nodes get to small, while smaller values are also more computationally intensive becasue trees will be deeper. This is important because shallow trees may not predict well, while deeper trees can lead to overfitting. The number of trees is also important because additionall trees make the model more computationally intesive, meaning that the smallest number of trees required would be desireable to reduce training, retraining, and prediction times. Typically, performance increases with the number of trees but the returns are diminishing.
+
+## Gradient Boosted Trees
+
+Gradient Boosted Trees extend on decision trees in a similar way to random forests. Just like random forests, only a subset of predictors are considered for at each node when making splits, and multiple trees are used, but this is where similarities end. Gradient boosted trees do not perform bagging, and build their trees sequentially instead. Each sequential tree is fitted to the negative gradients (the errors) of the current predictions based on some differentiable loss function, so each next tree is correcting the errors of the last in a way which decreases the loss function. The final prediction is the sum of all the predictions from the previous trees. In this paper, with only 2 classes the loss function optimized will be the log-loss, which is the negative log-likelihood from logistic regression. A mathmatical description of this process is below.
+
+Let $f_t$ be the prediction function at iteration $t$ of the boosting process, and $\hat{y}_i^{(t)} = \sum_{k=0}^t f_k(\symbf{x}_i)$, is the prediction at iteration $t$ for observation $i$, where $i \in \{1,2, 3, \dots, n \}$, and $\symbf{x}_i$ is the vector of predictor variables for observation $i$.
+
+The goal at each step $t$ is to build a new tree which minimizes the objective function, which is approximated using a second-order expansion of the loss function $\ell(.)$. This simply means approximating the loss function using its first and second derivatives, since many loss functions cannot be minimized efficiently in their closed form. This is especially important because models typically use thousands of boosting iterations so this calculation needs to be optimized and efficient. The loss function is left ambiguous because depending on the type of data used, and the goal of the model this loss function is different. For binary classification, the goal of this paper, the loss function used is the log-loss (see Log-Loss Derivation above). $\Omega(f_t)$ is a regularization term. These formulas are adapted from the explanation in @chen2016.
+
+\begin{center}
+\begin{align}
+\mathcal{L}^{(t)} &= \sum_{i=1}^N \ell\left(y_i, \hat{y}_i^{(t-1)} + f_t(\symbf{x}_i)\right) + \Omega(f_t)
+\tag{Objective} \\
+\mathcal{L}^{(t)} &\approx \sum_{i=1}^N \left[g_if_t(\symbf{x}_i) + \frac{1}{2} h_i f_t^2(\symbf{x}_i) \right] + \Omega(f_t) \tag{Second Order Approximation} \\
+g_i &= \left. \frac{\partial \ell(y_i, \hat{y}_i)}{\partial \hat{y}_i} \right|_{\hat{y}_i^{(t-1)}} \tag {Gradient} \\
+h_i &= \left. \frac{\partial^2 \ell(y_i, \hat{y}_i)}{\partial \hat{y}_i^2} \right|_{\hat{y}_i^{(t-1)}} \tag{Hessian}
+\end{align}
+\end{center}
+
+This is the core of gradient boosting, however finer details about how each tree is built, and splits are made or found in the trees differ across the many implementations such as XGBoost [@chen2016], LightGBM [@ke2017], and others. These additional details are beyond the scope of this explanation.
+
+The gradient boosting implementation used in this paper, is LightGBM [@ke2017], through its `R` package [@shi2025], and the `tidymodels` [@tidymodels] suite of packages. The hyperparameters exposed for tuning via `parsnip` inside of tidymodels, for the LightGBM models, are mtry, the number of variables considered at each node for splits, trees, the number of boosting iterations, min node size, the minimum size required to split node, tree depth, the maximum number of layers the tree can have, learn rate, the step size along the negative gradient, and loss reduction is the minimum reduction in the loss function required to make a split. Tree depth, min node size, and loss reduction, all control how deep the tree is allowed to grow, by either explicitly setting the depth, or by limiting when nodes can be split. The depth of the tree is very important because extremely deep trees can overfit the training data, while shallow trees may not result in the best predictions. Additionally, the number of boosting iterations can impact overfitting as well, but it also controls the computational load of the model. Ideally the model should use the least amount of iterations required to reach optimal perfomance, to reduce training, retraining, and prediction times.
+
+# Appendix C: Hyperparameter Tuning
+
+The hyperparameters for the random forest and gradient boosted trees, were tuned using an initial random grid
+of hyperparamter combinations, 100 for the random forest, 150 for the gradient boosted trees. These were then further refined by 50 iterations of Bayesian optimization, set to stop after 25 consecutive iterations of no improvement. All of these combindations were testing using 10-fold CV on the training set, and the range of potential hyperparameter values for the random search are in @tbl-param below:
+
+```{r}
+#| output: 'asis'
+#| label: tbl-param
+#| tbl-cap: "Hyperparameter Ranges Tested"
+params <- tibble(
+  Model = c("Both", "Both", "Both", "LightGbm", "LightGbm", "LightGbm"),
+  Hyperparameter = c(
+    "Mtry",
+    "Trees",
+    "Min Node Size",
+    "Tree Depth",
+    "Learn Rate",
+    "Loss Reduction"
+  ),
+  Range = c(
+    "1 -- 27",
+    "100 -- 3000",
+    "1 -- 1000",
+    "3 -- 25",
+    "$10^{-10}$ -- $10^{−1}$",
+    "$10^{-10}$  -- $10^{1.5}$"
+  )
+)
+
+kable(params, escape = FALSE)
+```
+
+The results of the hyperparameter tuning process are presented in @fig-rf and @fig-gbm below, which showcase side-by-side scatter plots with the hyperparameter value on the x-axis, and F1 score on the y-axis. Due to the number of dimensions involved, (4 for the random forest, 7 for the gradient boosted trees), its impossible to show a clear graph so these scatter plots may miss some of the interactions between the hyperparameter values and the F1 score.
+
+```{r}
+#| output: TRUE
+#| fig-cap: "Random Forest Hyperparameters Against F1 Score"
+#| fig-subcap: "F1 score tends to increase as the minimum node size and mtry decrease, but has no clear relationship with the number of trees used. The optimal values with the highest F1-score are an mtry of 3, 898 trees, and a minimum node size of 8, occuring on iteration 2 of the Bayesian optimization procedure."
+#| fig-cap-location: top
+#| label: fig-rf
+hyperparams$rf |>
+  select(mtry:min_n, mean) |>
+  pivot_longer(cols = !mean, names_to = "Hyperparameter") |>
+  ggplot(aes(x = value, y = mean)) +
+  geom_jitter(aes(color = Hyperparameter), alpha = 0.6) +
+  facet_grid(
+    ~Hyperparameter,
+    scales = "free_x",
+    switch = "x",
+    labeller = labeller(
+      Hyperparameter = c(min_n = "Min N", mtry = "Mtry", trees = "Trees")
+    )
+  ) +
+  guides(color = "none") +
+  labs(x = NULL, y = "F1") +
+  theme_minimal() +
+  theme(
+    legend.position = "none",
+    panel.spacing = unit(1, "lines"),
+    strip.background = element_blank(),
+    strip.text = element_text(face = "bold"),
+    panel.grid.minor = element_blank(),
+    plot.title = element_text(hjust = 0.5),
+    strip.placement = "outside",
+    axis.title = element_text(size = 12),
+    plot.subtitle = element_text(size = 12)
+  )
+best <- hyperparams$rf |> slice_max(order_by = mean, n = 1)
+```
+
+```{r}
+#| output: TRUE
+#| fig-cap: "Gradient Boost Trees Hyperparameters Against F1 Score"
+#| fig-cap-location: top
+#| fig-subcap: "The F1 score sharply increases with the learning rate, but otherwise has no clear relationship with any of the other hyperparameters. This is likely because the true relationship depends on an interaction of 2 or more hyperparameters which cannot be showcased in the plot. The optimal values are 25 for mtry, 2992 trees/boosting iterations, minimum node size of 346, tree depth of 24, learning rate of 0.0425, and a loss reduction of $2*10^{-10}$, occuring at iteration 47 of the Bayesian optimization procedure."
+#| label: fig-gbm
+
+hyperparams$gbm |>
+  select(mtry:loss_reduction, mean) |>
+  pivot_longer(cols = !mean, names_to = "Hyperparameter") |>
+  ggplot(aes(x = value, y = mean)) +
+  geom_jitter(aes(color = Hyperparameter), alpha = 0.6) +
+  facet_wrap(
+    ~Hyperparameter,
+    scales = "free_x",
+    nrow = 2,
+    labeller = labeller(
+      Hyperparameter = c(
+        min_n = "Min N",
+        mtry = "Mtry",
+        trees = "Trees",
+        tree_depth = "Tree Depth",
+        learn_rate = "Learn Rate",
+        loss_reduction = "Loss Reduction"
+      )
+    )
+  ) +
+  guides(color = "none") +
+  labs(x = NULL, y = "F1") +
+  theme_minimal() +
+  theme(
+    legend.position = "none",
+    panel.spacing = unit(1, "lines"),
+    strip.background = element_blank(),
+    strip.text = element_text(face = "bold"),
+    panel.grid.minor = element_blank(),
+    plot.title = element_text(hjust = 0.5),
+    strip.placement = "outside",
+    axis.title = element_text(size = 12),
+    plot.subtitle = element_text(size = 12)
+  )
+```
+
+```{r}
+best <- hyperparams$gbm |> slice_max(order_by = mean, n = 1)
+```
+
+# Appendix D: Supplemental Results
+
+## Perfomance Across Prediction Thresholds
+
+Although all of the models were evaluated using a prediction threshold of 0.5, this was not the F1-optimal thresholds for any of the models. The optimal thresholds were `r best_F1$threshold[best_F1$model == "logit"]`, `r best_F1$threshold[best_F1$model == "rf"]`, `r best_F1$threshold[best_F1$model == "gbm"]`, for the logistic regression, random forest, and gradient boosted trees respectively, which are all very close to 0.5.
+
+@fig-thresh below showcases the performance across the probability thresholds, highlighting the trade-off between recall and precision as the threshold changes. Although prediction thresholds can be altered to fit the needs of a campaign based on their error tolerance, if the classifier's F1-optimal threshold is far from 0.5, it indicates the model is not well calibrated, and systemically over or under confident. If the F1-optimal threshold is low, the model is too conservative in assigning high probabilities to the positive class, implying a weak signal within the data. However, if the F1-optimal threshold is to high, it indicates the model assigns high probabilities too liberally, meaning it is interpreting a signal for the positive class that is also shared by many members of the negative class. Geometrically, the classifier is drawing a decision boundary to split the classes based on the predicting information provided. If these predictors are highly overlapping with no clear signal to separate the classes, then the boundary learned from training will be highly complex and may not generalize well to unseen data, leading to poor perfomance. In this case, the F1-optimal thresholds are all around, 0.5, so the models are not under or over confidant.
+
+```{r}
+#| output: TRUE
+#| fig-cap: "Recall, Precision, and F1 Score Across Prediction Thresholds"
+#| fig-subcap: "Recall and Precision show monotonic relationships with the prediction threshold. As the threshold lowers, predictions become more liberal, capturing more donors, but also many false positives. As the threshold increases, predictions become more selective capturing less donors, but also less false positives. F1 on the other hand shows a parabolic path, with it reaching the maximum around the point the recall and precision curves meet, showcasing the balance of the two other metrics."
+#| label: fig-thresh
+#| fig-cap-location: top
+#| fig-width: 6.5
+thresholds |>
+  rename(Precision = precision, Recall = recall) |>
+  pivot_longer(cols = F1:Precision, names_to = "metric", values_to = "value") |>
+  ggplot(aes(x = threshold, y = value, color = metric)) +
+  geom_line(linewidth = 1.5, alpha = 0.6) +
+  facet_grid(
+    ~model,
+    switch = "x",
+    labeller = labeller(
+      model = c(
+        logit = "Logitistic Regression",
+        gbm = "Gradient Boosted Trees",
+        rf = "Random Forest"
+      )
+    )
+  ) +
+  labs(x = "Probability Threshold", y = "Metric", color = "Metric") +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5),
+    strip.text = element_text(face = "bold"),
+    strip.placement = "outside",
+    axis.title = element_text(size = 11),
+    panel.spacing = unit(1, "lines")
+  )
+```
+
+\clearpage
+\newpage
+
+## Confusion Matrices
+
+```{r}
+#| output: 'asis'
+#| tbl-cap: "Logit Confusion Matrix"
+#| label: tbl-lcf
+#| tbl-pos: "H"
+
+cf_log <- as_tibble(conf_mats$logit$table)
+cf_log <- matrix(
+  c(
+    cf_log$n[4],
+    cf_log$n[2],
+    cf_log$n[3],
+    cf_log$n[1]
+  ),
+  byrow = TRUE,
+  ncol = 2,
+  dimnames = list(
+    c("Predict Yes", "Predict No"),
+    c("Truth Yes", "Truth No")
+  )
+)
+
+stargazer(
+  cf_log,
+  summary = FALSE,
+  header = FALSE,
+  float = FALSE,
+  font.size = "small",
+  table.placement = "H"
+)
+```
+
+
+```{r}
+#| output: 'asis'
+#| tbl-cap: "Random Forest Confusion Matrix"
+#| label: tbl-dcf
+#| tbl-pos: "H"
+cf_drf <- as_tibble(conf_mats$rf$table)
+cf_drf <- matrix(
+  c(
+    cf_drf$n[4],
+    cf_drf$n[2],
+    cf_drf$n[3],
+    cf_drf$n[1]
+  ),
+  byrow = TRUE,
+  ncol = 2,
+  dimnames = list(
+    c("Predict Yes", "Predict No"),
+    c("Truth Yes", "Truth No")
+  )
+)
+stargazer(
+  cf_drf,
+  summary = FALSE,
+  header = FALSE,
+  float = FALSE,
+  font.size = "small",
+  table.placement = "H"
+)
+```
+
+```{r}
+#| output: 'asis'
+#| tbl-cap: "Gradient Boosted Trees Confusion Matrix"
+#| label: tbl-gcf
+#| tbl-pos: "H"
+cf_mrf <- as_tibble(conf_mats$gbm$table)
+cf_mrf <- matrix(
+  c(
+    cf_mrf$n[4],
+    cf_mrf$n[2],
+    cf_mrf$n[3],
+    cf_mrf$n[1]
+  ),
+  byrow = TRUE,
+  ncol = 2,
+  dimnames = list(
+    c("Predict Yes", "Predict No"),
+    c("Truth Yes", "Truth No")
+  )
+)
+stargazer(
+  cf_mrf,
+  summary = FALSE,
+  header = FALSE,
+  float = FALSE,
+  table.placement = "H",
+  font.size = "small"
+)
+```

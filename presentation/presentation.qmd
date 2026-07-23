@@ -1,0 +1,331 @@
+---
+title: "Predicting Donor Behavior: Applying Machine Learning to Donor Classification"
+author:
+  name: Noah Ochital^[<no9857a@american.edu>]
+  email: <no9857a@american.edu>
+format:
+    beamer:
+        slide-level: 2
+        institute: American University
+        header-includes: \setbeamerfont{footnote}{size=\tiny}
+fig-cap-location: bottom
+tbl-cap-location: top
+fig-pos: "H"
+tbl-pos: "H"
+execute:
+  echo: FALSE
+  output: FALSE
+  warning: FALSE
+  cache: TRUE
+bibliography: predict_donor.bib
+csl: american-political-science-association.csl
+---
+
+```{r}
+library(tidyverse)
+library(grid)
+library(gridExtra)
+library(ranger)
+library(tidymodels)
+library(naniar)
+library(mice)
+library(DescTools)
+library(stargazer)
+library(rpart)
+library(rpart.plot)
+library(BSDA)
+library(rstatix)
+library(vip)
+library(here)
+library(usmap)
+library(kableExtra)
+library(knitr)
+library(xtable)
+library(huxtable)
+
+load(here("envs/presentation_env.RData"))
+```
+
+## Current State of Campaign Finance^[@glavin; @reynolds; @stratmann; @gordon; @baker; @opensecrets; @dwyre]
+
+* Campaign Expenditures are rising:
+    * 2000: $5 Billion.
+    * 2020: $15 Billion.
+* Campaign Expenditures correlate with electoral sucess.
+* Individual Donors are a primary source of funding.
+    * Provided about 60% of direct funding in 2020.
+
+## Role for Predictive Models^[@dwyre; @walker2021; @nickerson2014]
+* Donors are scarce:
+    * 8.5% donated in 2020.
+    * Less than 2% gave more than $200.
+* Predictive models save campaign time and money.
+* Prominent usage since 2008 but little academic research.
+
+## Building Predictive Models
+:::: {.columns}
+::: {.column width="45%"}
+* Classification requires informative features
+* Tested 3 difference models:
+    * Logistic regression.
+    * Random forest.
+    * Gradient boosteed trees.
+* Main Questions:
+   * Will these models be effective?
+    * Which model will perform the best?
+    * Which features are the most informative?
+:::
+::: {.column width="55%"}
+```{r}
+#| output: TRUE
+#| fig-cap: "Example Classification Scenarios"
+#| fig-width: 2
+#| fig-height: 2
+
+x <- rnorm(100)
+y <- rnorm(100)
+Donor <- factor(
+  sample(c("No", "Yes"), 100, replace = TRUE, prob = c(1 - 0.085, 0.085)),
+  levels = c("No", "Yes")
+)
+ex_data <- tibble(x, y, Donor)
+
+ggplot(ex_data, aes(x = x, y = y, color = Donor)) +
+  geom_jitter() +
+  theme_void() +
+  theme(
+    legend.title = element_text(size = 10)
+  )
+```
+
+:::
+::::
+
+## Donor Motivations^[@dwyre; @francia2003;@baker; @barber; @barber2016; @niebler; @ensley; @traag2016]
+* Theorists have split donors into categories:
+    * Investors.
+    * Ideologues.
+    * Intimates.
+* Key empirical features:
+    * Ideological fervor (Candidates and Voters).
+    * Policy and partisan alignment.
+    * Connections to other donors.
+
+
+## Data Description^[@cces06; @cces07; @cces08; @cces10; @cces12; @cces14; @cces16; @cces17; @cces18; @cces19; @cces20; @cces22; @lones]
+* Data from 2006-2008, 2012, 2014, 2016-2020, and 2022 CES surveys.
+    * $n =$ `r nrow(original)`
+    * `r round(mean(original$donate, na.rm = TRUE) * 100, 2) `% are donors.
+* 27 features:
+    * Categorical: 138 one-hot-coded.
+    * Demographics.
+    * Wealth.
+    * Political Engagement.
+    * Ideology.
+* Training-Test Split
+    * 80% training.
+    * 20% test.
+
+## Hypotheses
+* $H_1$: At least one of the models will perform successfully.
+* $H_2$: The more complex models will peform better relative to less complex models.
+    * Donor behavior is complex.
+* $H_3$: Political and civic engagement variables will have high predictive power:
+    * Recognizing elected officials.
+    * Political activities.
+    * Voting intent.
+
+## Missing Data^[@memon; @memon2022; @zhang; @vink; @austin; @mice; @lones]
+:::: {.columns}
+::: {.column width="45%"}
+* Missing outcomes dropped
+    * $n =$ `r nrow(train) + nrow(test)`
+* Missingness mechanism assumption: Missing at Random (MAR)
+* Multiple Imputation By Chained Equations (MICE):
+    * 50 iterations.
+    * Train and test imputed separately.
+    * `mice` package in `R`.
+
+
+:::
+::: {.column width="55%"}
+```{r}
+#| output: 'asis'
+#| tbl-cap: "Glimpse of Missing Variables"
+#| label: tbl-gliv
+gliv <- as.data.frame(rbind(head(missing_vars, 5), tail(missing_vars, 5)))[, c(
+  1,
+  2
+)]
+stargazer(
+  gliv,
+  summary = FALSE,
+  digits = 0,
+  header = FALSE,
+  float = FALSE,
+  font.size = "small",
+  table.placement = "H"
+)
+```
+
+:::
+::::
+## Class Weighting^[@kuhn2016a; @bakirarar]
+* Significant class imbalance
+    * `r round(mean(train$donate == "Yes")* 100)`% are donors.
+    * `r round(mean(train$donate == "No")* 100)`% are not donors.
+* Sample Based Class Weight (SBCW) method:
+\begin{center}
+\begin{equation*}
+W_i = \frac{N}{k * n_i}
+\end{equation*}
+\end{center}
+:::: {.columns}
+::: {.column width="40%"}
+\begin{center}
+\begin{equation*}
+W_{\text{donor}} = \frac{361323}{2 * 94548} = 1.9108
+\end{equation*}
+\end{center}
+:::
+::: {.column width="60%"}
+\begin{center}
+\begin{equation*}
+W_{\text{non-donor}} = \frac{361323}{2 * 266775} = 0.6772
+\end{equation*}
+\end{center}
+:::
+
+## Models Used^[@james2013; @james2013a; @breiman_random; @friedman2001; @chen2016; @ke2017]
+
+* Logistic Regression:
+    * `glm()` from `R`
+\begin{center}
+$\hat{y}_i = \frac{1}{1 + \exp\left( -\symbf{x}_i^\text{T} \symbf{\beta} \right)}$
+\end{center}
+* Random Forest:
+    * `ranger()` from `ranger` package in `R`.
+\newline
+
+\begin{center}
+$\hat{y}_i = \frac{1}{T} \sum_{j=1}^N f_j(\symbf{x}_i) = \frac{\text{Tree}_1 + \text{Tree}_2 + \cdots +\text{Tree}_T}{T}$
+\end{center}
+* Gradient Boosted Trees:
+    * `LightGBM` implementation in `R`
+\newline
+\begin{center}
+$\hat{y}_i = f_0(\symbf{x}_i) + \sum_{t=1}^T f_t(\symbf{x}_i) = \text{Initial Guess} + \text{Tree}_1 + \text{Tree}_2 +\cdots +\text{Tree}_T$
+\end{center}
+
+
+## Hyperparameter Tuning^[@caret_book; @arnold; @probst; @raschka; @bergstra; @wu2019]
+:::: {.columns}
+::: {.column width="35%"}
+* 10-fold CV on the training set
+* Stage 1. Random hyperparameter search.
+* Stage 2. 50 iterations of Bayesian Optimization.
+:::
+::: {.column width="65%"}
+```{r}
+#| output: 'asis'
+#| tbl-cap: "Hyperparameter Ranges Tested"
+params$Model <- c(params$Model[1:3], rep("LightGBM", 3))
+kable(params, escape = FALSE)
+```
+:::
+::::
+
+## Test Set Performance
+```{r}
+#| output: 'asis'
+#| tbl-cap: ""
+names(metrics) <- c("Metric", "Logit", "Gradient Boosted", "Random Forest")
+stargazer(
+  as.data.frame(slice(metrics, 1:5)),
+  summary = FALSE,
+  digits = 4,
+  header = FALSE,
+  float = FALSE,
+  font.size = "small",
+  notes = "0.01 corresponds to 900 (Acc.), 237 (Rec.), and 326 (Prec.) People.",
+  notes.align = "l",
+  column.sep.width = "0.5pt"
+)
+```
+
+## Model Comparisons^[@raschka]
+* $\alpha = 0.05$
+* Cochran's Q Test:
+    * $H_0: ACC_1 = ACC_2 = ACC_3$
+    * $H_a: \exists \ i \neq j \text{ such that } ACC_i \neq ACC_j \text{, for } i,j \in \{1,2,3\}$
+    * $p=$`r options(scipen = 1, digits = 2); CochranQ$p`
+* Pairwise McNemar:
+    * $H_0: ACC_i = ACC_j$
+    * $H_a: ACC_i \neq ACC_j$
+    * Logit and boosted trees: `r McNemar$p[1]`
+    * Random forest and boosted trees: `r McNemar$p[2]`
+    * Logit and random forest: `r McNemar$p[3]`
+
+## Select Variable Contributions: Permutation Importance
+```{r}
+#| output: 'asis'
+#| tbl-cap: ""
+var_imp_final <- slice(var_imp2, c(1:8, 11, 13, 16, 17, 20:21, 27)) |>
+  as.data.frame()
+names(var_imp_final) <- c(
+  "Variable",
+  "Logit",
+  "Random Forest",
+  "Gradient Boosted"
+)
+stargazer(
+  var_imp_final,
+  summary = FALSE,
+  header = FALSE,
+  digits = 4,
+  font.size = "footnotesize",
+  float = FALSE
+)
+```
+
+## Revist Research Questions and Hypotheses
+* Q1: Were these models effective?
+    * Potentially, but without a proper comparison its difficult to conclude anything.
+* Q2: Which model was the best?
+     * F1 and Precision: Random Forest.
+     * Recall and ROC-AUC: Gradient Boosted.
+* Q3: Which features were the most important to predictive power?
+     * Political Activities.
+     * Model Dependent.
+        * Ideology, Party ID, Voting Intent
+
+
+## Limitations
+* Self reporting, missingness, other biases from survey.
+* Limited nuance in "Donor" variable.
+    * Contribution size.
+    * Contribution frequency.
+    * Contribution recipient.
+* Aggregating across election years.
+    * Changing political and campaign finance landscape.
+
+## Future Research and Next Steps:
+* More comprehensive data:
+    * Non-free sources.
+    * State or election specific.
+    * Specifically engineered surveys.
+* Utilizing LLMs
+    * LLMs can view the data in the raw form, and have deeper embeddings for qualitative data.
+    * Vast array of Pre-trained models.
+    * Low Rank Adaptation to retrain.
+
+
+## Thank You
+
+* Email: <no9857a@american.edu>, <noahochital@icloud.com>
+* Github: Noch05
+
+## References {allowframebreaks=1}
+\tiny
+:::{#refs}
+:::
