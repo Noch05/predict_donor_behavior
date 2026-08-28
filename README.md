@@ -15,7 +15,7 @@ understanding of them.
 ## Methodological Issues
 As of now, I know of three distinct methodological issues that damage the credibility of the paper.
 First, there is a data processing issue in file `00`. Faulty recoding results in `NA` values for data
-that is actually present, which by my estimation reduces the effective size of the dataset by ~50k
+that are actually present, which, by my estimation, reduces the effective size of the dataset by ~50k
 respondents (after removing NA values from the dependent variable donate, the paper uses ~450k
 observations when it should use ~500k). This likely also means that many more values were imputed
 than necessary, although the original paper reported that the absolute volume of missing values was
@@ -46,7 +46,7 @@ Third, survey weights are not used when training the model, which matters given 
 ## Scope Issues
 
 
-Overall, the questions used from each survey are limited in scope and don't capture many of the
+Overall, the questions used in each survey are limited in scope and don't capture many of the
 variables that would seem, from a common-sense perspective, important for predicting donations. I
 claim in the paper that it is limited by which questions were asked in every wave of the survey,
 which is why many policy-related questions had to be dropped. That characterization is only
@@ -94,10 +94,10 @@ some sudden divergence in each model's performance).
 This is a GitHub Repository for my research project: "Predicting Donor Behavior: Applying Machine Learning to Donor Classification"
 This repo houses all the code that produced my final product.
 
-The goal of this project was to build off of existing literature on causal relationships between various factors
-and propensity to donate by using machine learning to predict the outcome instead. I tested a simple logistic regression, a random forest, and LightGBM boosted trees.
+The goal of this project was to build off of existing literature on broad donor behavior and 
+individual propensity to donate to create a predictive model using standard machine learning techniques. As I explain in the paper, the success of this would have wide applications (though it is a moot point, since campaigns are already using far more complex systems), but more importantly, it could be used to uncover insights missed by previous research. A disconnect between the variables deemed important by the theoretical models and the ones useful for predictions would warrant further investigation, while alignment would provide evidence validating the prior theories. I tested a simple logistic regression, a random forest, and LightGBM boosted trees.
 The random forest and LightGBM models underwent hyperparameter tuning, while the logistic regression did not (it has no hyperparameters to tune).
-Ultimately, I find model performance across all models (F1 $\approx 0.6$), and I conclude that the noisy data and issues with survey responses hinder the models. 
+Ultimately, I find that each model performs similarly (F1 $\approx 0.6$), though each regards different variables as the most useful (according to permutation importance scores), and conclude that noisy data and issues with survey responses are the limiting factors for each model. Additionally, the most important variables for each model align with the existing empirical and theoretical literature.
 
 ## Data
 
