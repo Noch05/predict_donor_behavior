@@ -82,7 +82,7 @@ at play in the surveys; respondents can easily lie, lack the understanding to an
 properly, etc.).
 
 The above scope changes and methodological fixes would make the work
-more defensible, but in my view they simply aren't worth the time and effort required (AI could make
+more defensible, but in my view they aren't worth the time and effort required (AI could make
 some of this trivial, but I wouldn't feel comfortable having it do all the work at this stage) given
 that I think these initial results will not be changed by that much (or at least there will not be
 some sudden divergence in each model's performance).
@@ -95,9 +95,9 @@ This is a GitHub Repository for my research project: "Predicting Donor Behavior:
 This repo houses all the code that produced my final product.
 
 The goal of this project was to build off of existing literature on causal relationships between various factors
-and propensity to donate, by using machine learning to predict the outcome instead. I tested a simple logistic regression, a random forest, and LightGBM boosted trees.
-The random forest and LightGBM models underwent hyperparameter tuning, while the logistic regression did not (having none to tune).
-Ultimately, I find model performance across all models (F1 $\approx 0.6$), and I conclude that the noisy data and issues with survey responses hinder the models.
+and propensity to donate by using machine learning to predict the outcome instead. I tested a simple logistic regression, a random forest, and LightGBM boosted trees.
+The random forest and LightGBM models underwent hyperparameter tuning, while the logistic regression did not (it has no hyperparameters to tune).
+Ultimately, I find model performance across all models (F1 $\approx 0.6$), and I conclude that the noisy data and issues with survey responses hinder the models. 
 
 ## Data
 
